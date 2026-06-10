@@ -1,0 +1,32 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: hqmr-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # Optional: run the LiteLLM proxy in a container.
+  # Uncomment and provide env_file once you have keys in .env
+  # litellm:
+  #   image: ghcr.io/berriai/litellm:main-stable
+  #   container_name: hqmr-litellm
+  #   ports:
+  #     - "4000:4000"
+  #   env_file: .env
+  #   volumes:
+  #     - ./config:/app/config
+  #   command: ["--config", "/app/config/config.yaml", "--port", "4000"]
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+
+volumes:
+  redis-data:

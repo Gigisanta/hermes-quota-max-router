@@ -1,0 +1,84 @@
+# Hermes QuotaMax Router — LiteLLM config
+# This is the Phase 0 base. The Orchestrator (Phase 3) will
+# dynamically compose routing decisions ON TOP of this file.
+
+model_list:
+  # --- Free / Generous Tier (default preference) ---
+  - model_name: deepseek-r1
+    litellm_params:
+      model: deepseek/deepseek-r1-0528
+      api_key: os.environ/DEEPSEEK_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 1
+      strengths: [deep_reasoning, agentic_god, coding_sota, math_expert, long_chain_of_thought]
+
+  - model_name: qwen3-thinking
+    litellm_params:
+      model: openrouter/qwen/qwen3-235b-a22b-thinking-2507
+      api_key: os.environ/OPENROUTER_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 2
+      strengths: [tool_master, parallel_tool_use, instruction_following_god, deep_reasoning]
+
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 3
+      strengths: [long_context_king, vision_master, high_throughput, research_master]
+
+  - model_name: llama-scout-groq
+    litellm_params:
+      model: groq/meta-llama/llama-4-scout-17b-16e-instruct
+      api_key: os.environ/GROQ_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 4
+      strengths: [ultra_fast, high_volume, cheap_parallel, json_mode_perfect]
+
+  - model_name: moonshot-v2
+    litellm_params:
+      model: openrouter/moonshotai/moonshot-v2-200k
+      api_key: os.environ/OPENROUTER_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 5
+      strengths: [long_coherence, 200k_plus, narrative_coherence, writing_master]
+
+  - model_name: doubao-fast
+    litellm_params:
+      model: openrouter/bytedance/doubao-fast
+      api_key: os.environ/OPENROUTER_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 6
+      strengths: [high_volume, cheap_parallel, ultra_fast]
+
+  # --- Paid Tier (preserve, last resort) ---
+  - model_name: gpt-5.5
+    litellm_params:
+      model: openai-codex/gpt-5.5
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      tier: paid
+      tier_rank: 99
+      strengths: [instruction_following_god, json_mode_perfect, structured_output, agentic_god]
+
+router_settings:
+  num_retries: 2
+  timeout: 60
+  allowed_fails: 3
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  telemetry: false
+  cache: true
+
+general_settings:
+  master_key: os.environ/ROUTER_MASTER_KEY
+  telemetry: false

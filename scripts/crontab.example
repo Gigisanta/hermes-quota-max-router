@@ -1,0 +1,13 @@
+# Cron schedule suggestions for the operational scripts.
+
+# Reset all quotas at midnight UTC. Daily reset is the spec's expected cadence
+# for most providers (DeepSeek, Qwen, Gemini, Moonshot, Doubao).
+# Some providers reset at different UTC offsets; refine the cron if needed.
+0 0 * * * cd /Users/prueba/workspaces/hermes-quota-max-router && /Users/prueba/workspaces/hermes-quota-max-router/.venv/bin/python -m scripts.operations reset-quotas >> logs/reset_quotas.log 2>&1
+
+# Auto-update the registry from the latest feed every 48 hours.
+# The spec's Auto-Updater Agent runs every 48-72h; we go with 48h to be safe.
+0 */48 * * * cd /Users/prueba/workspaces/hermes-quota-max-router && /Users/prueba/workspaces/hermes-quota-max-router/.venv/bin/python -m scripts.operations auto-update >> logs/auto_update.log 2>&1
+
+# Hourly usage report for cost visibility.
+0 * * * * cd /Users/prueba/workspaces/hermes-quota-max-router && /Users/prueba/workspaces/hermes-quota-max-router/.venv/bin/python -m scripts.operations usage-report >> logs/usage_report.log 2>&1
