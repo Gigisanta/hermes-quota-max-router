@@ -47,6 +47,7 @@ dev = [
     "fakeredis>=2.26.0",
     "ruff>=0.6.0",
     "mypy>=1.11.0",
+    "hypothesis>=6.100.0",
 ]
 self-host = [
     "vllm>=0.6.0",
