@@ -19,6 +19,7 @@ Run:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -50,6 +51,11 @@ from core.security import (
     require_master_key,
     with_retry,
 )
+
+# iter 15: extracted modules (god-object refactor)
+from server.dependencies import make_auth_and_rate_limit
+from server.lifecycle import is_quota_reset_disabled, make_quota_reset_loop
+from server.middlewares import make_security_headers_middleware
 
 log = logging.getLogger(__name__)
 
@@ -252,94 +258,34 @@ def build_app(
     app = FastAPI(title="Hermes QuotaMax Router", version="0.1.0")
     master_key = os.environ.get("ROUTER_MASTER_KEY", "")
 
-    # Phase 16: in-process quota auto-reset scheduler.
-    # Runs `quota.maybe_reset_due()` every ``ROUTER_QUOTA_RESET_INTERVAL_S``
-    # seconds (default 1 hour). Idempotent — cheap when nothing is due.
-    # Disable with ROUTER_QUOTA_RESET_DISABLED=1.
-    import asyncio
-    _reset_interval_s = float(os.environ.get("ROUTER_QUOTA_RESET_INTERVAL_S", "3600"))
-    _reset_disabled = os.environ.get("ROUTER_QUOTA_RESET_DISABLED", "").strip().lower() in ("1", "true", "yes")
+    # iter 15: extracted quota-reset background loop (lifecycle.py)
+    _reset_disabled = is_quota_reset_disabled()
+    if not _reset_disabled:
+        _start_loop = make_quota_reset_loop(quota.maybe_reset_due)
+        _quota_reset_task: asyncio.Task[None] | None = None
 
-    async def _quota_reset_loop() -> None:
-        if _reset_disabled or _reset_interval_s <= 0:
-            return
-        while True:
-            try:
-                n = quota.maybe_reset_due()
-                if n:
-                    log.info("quota_reset_loop: reset %d model(s)", n)
-            except Exception as e:  # noqa: BLE001
-                log.warning("quota_reset_loop: %s", e)
-            await asyncio.sleep(_reset_interval_s)
+        @app.on_event("startup")
+        async def _start_quota_reset_loop() -> None:
+            nonlocal _quota_reset_task
+            _quota_reset_task = _start_loop()
 
-    @app.on_event("startup")
-    async def _start_quota_reset_loop() -> None:
-        if _reset_disabled:
-            return
-        app.state.quota_reset_task = asyncio.create_task(_quota_reset_loop())  # type: ignore[attr-defined]
+        @app.on_event("shutdown")
+        async def _stop_quota_reset_loop() -> None:
+            if _quota_reset_task is not None:
+                _quota_reset_task.cancel()
 
-    @app.on_event("shutdown")
-    async def _stop_quota_reset_loop() -> None:
-        task = getattr(app.state, "quota_reset_task", None)  # type: ignore[attr-defined]
-        if task is not None:
-            task.cancel()
+    # iter 15: extracted security-headers middleware (middlewares.py)
+    app.add_middleware(make_security_headers_middleware)  # type: ignore[arg-type]
 
-    # --- security middleware ---
+    # iter 15: extracted auth + rate-limit dependency (dependencies.py)
+    def _bump_rate_limited() -> None:
+        metrics["rate_limited_total"] += 1
 
-    @app.middleware("http")
-    async def add_security_headers(request: Request, call_next):
-        response = await call_next(request)
-        # Existing baseline (Phase 8)
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("Referrer-Policy", "no-referrer")
-        # Added in iter 15: HSTS, CSP, Permissions-Policy.
-        # HSTS only makes sense behind TLS, but we set it anyway — proxies
-        # can strip or override. CSP is strict because the JSON API is
-        # never rendered as HTML; we explicitly deny all sources.
-        response.headers.setdefault(
-            "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
-        )
-        response.headers.setdefault(
-            "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
-        )
-        response.headers.setdefault(
-            "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
-        )
-        return response
-
-    # --- dependencies ---
-
-    def auth_and_rate_limit(request: Request) -> str:
-        """Combined: auth + rate limit. Returns the client key for logging.
-
-        Auth model (iter 15 hardening):
-        - If `ROUTER_MASTER_KEY` is set, the request MUST carry a matching
-          `Authorization: Bearer *** header. Constant-time compare.
-        - If `ROUTER_MASTER_KEY` is NOT set, the server will REFUSE TO
-          START unless `ROUTER_ALLOW_INSECURE_NO_AUTH=1` is also set.
-          This is enforced in `build_app()` below. By the time we reach
-          this dependency, we know either auth is configured or the
-          operator opted in to dev mode.
-        """
-        # 1. Auth (captured at app build time, not read dynamically per request)
-        if master_key:
-            auth = request.headers.get("authorization")
-            if not auth or not auth.startswith("Bearer "):
-                raise HTTPException(
-                    status_code=401, detail="Missing or invalid Authorization header"
-                )
-            provided = auth.removeprefix("Bearer ").strip()
-            # constant-time compare (best-effort, key is in env)
-            import hmac as _hmac
-            if not _hmac.compare_digest(provided.encode("utf-8"), master_key.encode("utf-8")):
-                raise HTTPException(status_code=401, detail="Invalid API key")
-        # 2. Rate limit (per IP, falls back to "unknown")
-        client_ip = request.client.host if request.client else "unknown"
-        if not rate_limiter.allow(client_ip, cost=1.0):
-            metrics["rate_limited_total"] += 1
-            raise HTTPException(status_code=429, detail="Rate limit exceeded")
-        return client_ip
+    auth_and_rate_limit = make_auth_and_rate_limit(
+        master_key=master_key,
+        rate_limiter=rate_limiter,
+        on_rate_limited=_bump_rate_limited,
+    )
 
     # --- endpoints ---
 
