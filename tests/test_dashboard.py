@@ -58,19 +58,23 @@ def test_format_quota_table_includes_all_models() -> None:
 
 
 def test_run_chat_with_empty_message(state) -> None:
-    decision, response, status = run_chat(state, "")
+    decision, response, metrics, status = run_chat(state, "")
     assert "Type a request" in decision
     assert response == ""
+    assert metrics == ""
     assert status == ""
 
 
 def test_run_chat_with_real_message(state) -> None:
-    decision, response, status = run_chat(
+    """Headless run (no router reachable) should still produce a decision
+    and a clear error string for the user."""
+    decision, response, metrics, status = run_chat(
         state, "Refactor this Python function and add pytest coverage",
     )
     assert "Strategy" in decision
-    assert "demo mode" in response.lower()
-    assert "Tokens reserved" in status
+    # Either a real response (if router is up) or an "unreachable" string.
+    assert response  # non-empty
+    assert status.startswith("Last call") or "Failed" in status or "unreachable" in response.lower()
 
 
 def test_run_updater_with_valid_feed(state, tmp_path) -> None:
@@ -93,5 +97,5 @@ def test_run_updater_with_valid_feed(state, tmp_path) -> None:
 
 
 def test_run_updater_with_missing_feed(state, tmp_path) -> None:
-    md = run_updater(state, str(tmp_path / "nonexistent.json"))
+    md = run_updater(str(tmp_path / "nonexistent.json"))
     assert "not found" in md.lower()
