@@ -409,7 +409,11 @@ def build_app(
             _lg = logging.getLogger(__name__)
             _lg.warning(
                 "router_fallback: chosen_model=%s actual_model=%s reason=%s",
-                (result.decision.models_to_use[0] if getattr(result.decision, "models_to_use", None) else "(unknown)"),
+                (
+                    result.decision.models_to_use[0]
+                    if getattr(result.decision, "models_to_use", None)
+                    else "(unknown)"
+                ),
                 result.model_used or "(unknown)",
                 result.error or "(none)",
             )
