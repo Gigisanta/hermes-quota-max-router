@@ -161,9 +161,14 @@ class MoAEngine:
             total_tokens += c.tokens
             if c.response is not None:
                 per_model[c.model_id] = c.response
-                # Best-effort quota consumption. If the model is unknown to
-                # the quota store, consume() returns False and we just skip.
-                self.quota.consume(c.model_id, c.tokens)
+                # iter 15: best-effort quota consumption. If the model
+                # is unknown to the quota store, consume() returns False
+                # and we just skip. Run the sync Redis call in a thread
+                # so the event loop stays free.
+                try:
+                    await asyncio.to_thread(self.quota.consume, c.model_id, c.tokens)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("moa quota.consume failed for %s: %s", c.model_id, e)
             elif c.error:
                 errors[c.model_id] = c.error
 
@@ -182,7 +187,11 @@ class MoAEngine:
                 self.synthesizer_model, prompt, per_model, self.timeout_s,
             )
             total_tokens += synth_tokens
-            self.quota.consume(self.synthesizer_model, synth_tokens)
+            # iter 15: same as above — non-blocking quota update.
+            try:
+                await asyncio.to_thread(self.quota.consume, self.synthesizer_model, synth_tokens)
+            except Exception as e:  # noqa: BLE001
+                log.warning("moa quota.consume failed for synthesizer %s: %s", self.synthesizer_model, e)
         except Exception as e:  # noqa: BLE001
             synth = (
                 "[synthesis failed: " + str(e)[:200] + "]\n\n"
