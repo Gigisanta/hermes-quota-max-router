@@ -11,21 +11,21 @@ Behavior:
      the failure gracefully)
   4. Shows the updated quota snapshot
 """
+
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core.model_registry import ModelRegistry
-from core.quota_manager import QuotaManager
-from core.task_analyzer import HeuristicTaskAnalyzer
-from core.orchestrator import RuleBasedOrchestrator
 from core.moa_engine import MoAEngine, run_sync
+from core.model_registry import ModelRegistry
+from core.orchestrator import RuleBasedOrchestrator
+from core.quota_manager import QuotaManager
 from core.schemas import TaskAnalysis
+from core.task_analyzer import HeuristicTaskAnalyzer
 
 
 def main() -> int:
@@ -52,8 +52,10 @@ def main() -> int:
     for msg in requests:
         a = an.analyze(msg)
         d = orch.route(a, reg, qm)
-        print(f"  [{d.chosen_strategy:8s}] {d.primary_model[:55]:55s} "
-              f"conf={d.confidence:.2f}  paid!={not d.preserve_paid_quota}")
+        print(
+            f"  [{d.chosen_strategy:8s}] {d.primary_model[:55]:55s} "
+            f"conf={d.confidence:.2f}  paid!={not d.preserve_paid_quota}"
+        )
         print(f"    ↳ {d.reasoning[:130]}")
 
     # MoA dry-run: top 3 free models, expecting failures (no real keys)
@@ -73,8 +75,7 @@ def main() -> int:
     print("\n── Quota snapshot after run ──\n")
     for s in qm.all_snapshots():
         if s.has_quota() and s.total:
-            print(f"  {s.model_id[:55]:55s} {s.remaining:>14,}/{s.total:<14,}  "
-                  f"({s.pct_remaining:5.1%})")
+            print(f"  {s.model_id[:55]:55s} {s.remaining:>14,}/{s.total:<14,}  ({s.pct_remaining:5.1%})")
         else:
             print(f"  {s.model_id[:55]:55s} {'paid/unlimited':>30}")
 

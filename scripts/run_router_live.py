@@ -4,6 +4,7 @@ This is the production-style launcher: it points at the real Gemini key
 already in the env (or hardcoded fallback), so chat completions go through
 the actual LLM provider instead of the stub path.
 """
+
 from __future__ import annotations
 
 import os
@@ -22,7 +23,7 @@ os.environ["ROUTER_LIVE"] = "1"
 # Match the plugin default port.
 os.environ.setdefault("ROUTER_PORT", "8088")
 
-import uvicorn  # noqa: E402
+import uvicorn
 
 if __name__ == "__main__":
     port = int(os.environ.get("ROUTER_PORT", "8088"))

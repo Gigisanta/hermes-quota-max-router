@@ -18,24 +18,43 @@ Usage:
     from server.logging_config import configure_json_logging
     configure_json_logging(level="INFO")
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import os
 import sys
-import time
-from datetime import datetime, timezone
-
+from datetime import UTC, datetime
 
 # Standard LogRecord attributes — everything else in the record is
 # from ``extra={...}`` and is part of the structured payload.
-_STANDARD_ATTRS = frozenset({
-    "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
-    "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
-    "created", "msecs", "relativeCreated", "thread", "threadName",
-    "processName", "process", "message", "asctime",
-})
+_STANDARD_ATTRS = frozenset(
+    {
+        "name",
+        "msg",
+        "args",
+        "levelname",
+        "levelno",
+        "pathname",
+        "filename",
+        "module",
+        "exc_info",
+        "exc_text",
+        "stack_info",
+        "lineno",
+        "funcName",
+        "created",
+        "msecs",
+        "relativeCreated",
+        "thread",
+        "threadName",
+        "processName",
+        "process",
+        "message",
+        "asctime",
+    }
+)
 
 
 class JsonFormatter(logging.Formatter):
@@ -53,7 +72,8 @@ class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, object] = {
             "ts": datetime.fromtimestamp(
-                record.created, tz=timezone.utc,
+                record.created,
+                tz=UTC,
             ).isoformat(timespec="milliseconds"),
             "level": record.levelname,
             "logger": record.name,
@@ -100,10 +120,7 @@ def configure_json_logging(level: str = "INFO") -> None:
 
 def is_json_logging_enabled() -> bool:
     """True if the JSON handler is currently installed on the root logger."""
-    return any(
-        getattr(h, "_qr_json_handler", False)
-        for h in logging.getLogger().handlers
-    )
+    return any(getattr(h, "_qr_json_handler", False) for h in logging.getLogger().handlers)
 
 
 # Auto-enable when ROUTER_LOG_FORMAT=json (the standard env var for this).

@@ -1,4 +1,5 @@
 """Tests for BudgetMonitor (Phase 14)."""
+
 import fakeredis
 import pytest
 
@@ -25,6 +26,7 @@ def monitor() -> BudgetMonitor:
 
 # --- construction ---
 
+
 def test_invalid_warn_pct_raises() -> None:
     with pytest.raises(ValueError):
         BudgetMonitor(warn_pct=0.0)
@@ -40,6 +42,7 @@ def test_invalid_block_pct_raises() -> None:
 
 
 # --- should_warn / should_block ---
+
 
 def test_should_warn_at_threshold(monitor: BudgetMonitor, qm: QuotaManager) -> None:
     qm.consume("m/warn", 200)  # 20% consumed
@@ -67,6 +70,7 @@ def test_unknown_model_safe(monitor: BudgetMonitor, qm: QuotaManager) -> None:
 
 # --- check (event firing) ---
 
+
 def test_check_fires_warn_once(monitor: BudgetMonitor, qm: QuotaManager) -> None:
     qm.consume("m/warn", 800)  # 80% consumed
     fired1 = monitor.check(qm, "m/warn")
@@ -92,6 +96,7 @@ def test_check_no_fire_below_threshold(monitor: BudgetMonitor, qm: QuotaManager)
 
 # --- reset_alerts ---
 
+
 def test_reset_alerts_re_arms(monitor: BudgetMonitor, qm: QuotaManager) -> None:
     qm.consume("m/warn", 800)
     monitor.check(qm, "m/warn")
@@ -114,6 +119,7 @@ def test_reset_all_alerts(monitor: BudgetMonitor, qm: QuotaManager) -> None:
 
 
 # --- burn_rates ---
+
 
 def test_burn_rates_returns_all_tracked(monitor: BudgetMonitor, qm: QuotaManager) -> None:
     qm.consume("m/ok", 100)

@@ -3,6 +3,7 @@
 TaskAnalysis is the output of the Task Analyzer.
 RoutingDecision is the output of the Orchestrator (matches spec §6 exactly).
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class TaskAnalysis(BaseModel):
     """Structured task requirements (output of task_analyzer.md)."""
+
     required_tags: list[str] = Field(default_factory=list)
     estimated_input_tokens: int = 0
     estimated_output_tokens: int = 0
@@ -21,8 +23,13 @@ class TaskAnalysis(BaseModel):
     min_quality: Literal["high", "very_high", "exceptional"] = "high"
     language: Literal["es", "en", "zh", "mixed"] = "en"
     task_type: Literal[
-        "code", "research", "writing", "analysis",
-        "planning", "extraction", "chat",
+        "code",
+        "research",
+        "writing",
+        "analysis",
+        "planning",
+        "extraction",
+        "chat",
     ] = "chat"
     notes: str = ""
 
@@ -37,6 +44,7 @@ class RoutingDecision(BaseModel):
 
     Exact field names from spec §6.
     """
+
     chosen_strategy: Literal["direct", "moa", "critique", "multi_step", "fallback"] = "direct"
     primary_model: str
     fallback_model: str | None = None

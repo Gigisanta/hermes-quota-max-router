@@ -84,6 +84,12 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B", "N", "RUF"]
+# These entrypoints mutate sys.path / load .env before importing project code.
+"server/app.py" = ["E402"]
+"dashboard/app.py" = ["E402"]
+"scripts/*" = ["E402"]
+# Plugin directory name is dictated by the Hermes Agent plugin loader.
+"scripts/hermes_plugin/quotamax-router/__init__.py" = ["N999"]
 
 [tool.mypy]
 python_version = "3.11"

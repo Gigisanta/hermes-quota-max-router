@@ -21,18 +21,21 @@ decides for you.
 If `live=True`, the engine calls real LiteLLM. If `live=False`, it
 returns a deterministic stub response — useful for tests and demos.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from collections.abc import Iterator
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-from .model_registry import ModelRegistry
+from .health_probe import HealthProbe, get_default_probe
 from .moa_engine import MoAEngine, run_sync
+from .model_registry import ModelRegistry
 from .orchestrator import RuleBasedOrchestrator
 from .quota_manager import QuotaManager
 from .schemas import RoutingDecision, TaskAnalysis
@@ -46,6 +49,7 @@ LOG_PATH = Path(__file__).resolve().parent.parent / "logs" / "router.jsonl"
 @dataclass
 class RouterCallResult:
     """The full record of one router-engine call."""
+
     decision: RoutingDecision
     model_used: str
     content: str
@@ -64,7 +68,7 @@ class RouterCallResult:
 
     def to_dict(self) -> dict:
         d = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "decision_strategy": self.decision.chosen_strategy,
             "model_used": self.model_used,
             "input_tokens": self.input_tokens,
@@ -98,12 +102,14 @@ def _stub_response(model: str, messages: list[dict]) -> dict:
         "",
     )
     return {
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "content": f"[stub:{model}] You said: {user_msg[:200]}",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": f"[stub:{model}] You said: {user_msg[:200]}",
+                }
             }
-        }],
+        ],
         "usage": {
             "prompt_tokens": max(1, len(user_msg) // 4),
             "completion_tokens": 20,
@@ -122,7 +128,7 @@ class RouterEngine:
         moa_engine: MoAEngine | None = None,
         live: bool = False,
         log_path: Path | None = None,
-        health_probe: "HealthProbe | None" = None,  # iter 15: see core.health_probe
+        health_probe: HealthProbe | None = None,  # iter 15: see core.health_probe
     ) -> None:
         self.registry = registry
         self.quota = quota_manager
@@ -134,10 +140,7 @@ class RouterEngine:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         # iter 15: circuit breaker. If caller doesn't pass one, use the
         # process-wide default (lazy-init singleton).
-        if health_probe is None:
-            from .health_probe import get_default_probe
-            health_probe = get_default_probe()
-        self.health_probe = health_probe
+        self.health_probe = health_probe if health_probe is not None else get_default_probe()
 
     # --- main entrypoint ---
 
@@ -202,8 +205,14 @@ class RouterEngine:
             return self._execute_moa(decision, analysis, user_msg, started)
 
         return self._execute_with_fallback(
-            decision, analysis, chosen, fallback, messages, started,
-            tools=tools, tool_choice=tool_choice,
+            decision,
+            analysis,
+            chosen,
+            fallback,
+            messages,
+            started,
+            tools=tools,
+            tool_choice=tool_choice,
         )
 
     # --- execution paths ---
@@ -273,8 +282,13 @@ class RouterEngine:
 
         # Try primary
         result = self._call_one(primary, messages, tools=tools, tool_choice=tool_choice)
-        if result["error"] and fallback and not self.quota.should_block(
-            fallback, decision.estimated_tokens,
+        if (
+            result["error"]
+            and fallback
+            and not self.quota.should_block(
+                fallback,
+                decision.estimated_tokens,
+            )
         ):
             log.warning("Primary %s failed (%s); using fallback %s", primary, result["error"], fallback)
             result = self._call_one(fallback, messages, tools=tools, tool_choice=tool_choice)
@@ -338,6 +352,7 @@ class RouterEngine:
             }
         try:
             from litellm import completion
+
             kwargs: dict[str, Any] = {
                 "model": model,
                 "messages": messages,
@@ -352,7 +367,8 @@ class RouterEngine:
             # imported (server/app.py:51) yet never called; transient
             # errors cascaded straight to fallback. Now we attempt up to
             # 3 calls with exponential backoff before giving up.
-            from .security import is_transient_error, with_retry as _with_retry
+            from .security import is_transient_error
+            from .security import with_retry as _with_retry
 
             def _do() -> dict[str, Any]:
                 resp = completion(**kwargs)
@@ -370,7 +386,7 @@ class RouterEngine:
                 # iter 15: record success on the probe.
                 self.health_probe.record_success(model)
                 return result
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 # iter 15: record failure on the probe, classified.
                 self.health_probe.record_failure(
                     model,
@@ -416,7 +432,6 @@ class RouterEngine:
         `litellm.completion(stream=True)`.
         """
         # Route first so "auto" gets resolved to a concrete model.
-        started = time.monotonic()
         user_msg = next(
             (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
             "",
@@ -447,6 +462,7 @@ class RouterEngine:
 
         try:
             from litellm import completion
+
             kwargs: dict[str, Any] = {
                 "model": chosen,
                 "messages": messages,
@@ -478,7 +494,7 @@ class RouterEngine:
                 except (AttributeError, IndexError):
                     # Unexpected shape; skip the piece.
                     continue
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             yield {
                 "model": chosen,
                 "delta": {"role": "assistant", "content": f"[stream error: {exc}]"},
@@ -494,10 +510,12 @@ class RouterEngine:
 if __name__ == "__main__":
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     from core.model_registry import ModelRegistry
     from core.quota_manager import QuotaManager
+
     reg = ModelRegistry()
     qm = QuotaManager()
     qm.sync_from_registry(reg)

@@ -1,20 +1,19 @@
 """Tests for config validation (Phase 10)."""
+
 import json
 from pathlib import Path
 
 import pytest
 
 from scripts.validate_config import (
-    ValidationReport,
+    validate_all,
     validate_config_yaml,
     validate_models_json,
     validate_redis,
-    validate_all,
-    REQUIRED_MODEL_FIELDS,
 )
 
-
 # --- validate_config_yaml ---
+
 
 def test_valid_config_passes(tmp_path: Path) -> None:
     p = tmp_path / "config.yaml"
@@ -64,17 +63,32 @@ def test_config_entry_missing_litellm_params_errors(tmp_path: Path) -> None:
 
 # --- validate_models_json ---
 
+
 def test_valid_seed_passes(tmp_path: Path) -> None:
     p = tmp_path / "models.json"
-    p.write_text(json.dumps({
-        "version": "2026-06-10",
-        "models": [{
-            "model_id": "x/y", "provider": "x", "display_name": "Y",
-            "context_window": 1000, "input_price": 0.0, "output_price": 0.0,
-            "is_free": True, "tier_rank": 1, "strength_tags": [],
-            "weakness_tags": [], "best_for": [], "performance_score": 50.0,
-        }],
-    }))
+    p.write_text(
+        json.dumps(
+            {
+                "version": "2026-06-10",
+                "models": [
+                    {
+                        "model_id": "x/y",
+                        "provider": "x",
+                        "display_name": "Y",
+                        "context_window": 1000,
+                        "input_price": 0.0,
+                        "output_price": 0.0,
+                        "is_free": True,
+                        "tier_rank": 1,
+                        "strength_tags": [],
+                        "weakness_tags": [],
+                        "best_for": [],
+                        "performance_score": 50.0,
+                    }
+                ],
+            }
+        )
+    )
     report = validate_models_json(p)
     assert report.ok
     assert report.models_loaded == 1
@@ -103,16 +117,42 @@ def test_missing_models_list_errors(tmp_path: Path) -> None:
 
 def test_duplicate_model_id_errors(tmp_path: Path) -> None:
     p = tmp_path / "dup.json"
-    p.write_text(json.dumps({"models": [
-        {"model_id": "x/y", "provider": "x", "display_name": "A",
-         "context_window": 1000, "input_price": 0.0, "output_price": 0.0,
-         "is_free": True, "tier_rank": 1, "strength_tags": [],
-         "weakness_tags": [], "best_for": [], "performance_score": 50.0},
-        {"model_id": "x/y", "provider": "x", "display_name": "B",
-         "context_window": 1000, "input_price": 0.0, "output_price": 0.0,
-         "is_free": True, "tier_rank": 1, "strength_tags": [],
-         "weakness_tags": [], "best_for": [], "performance_score": 50.0},
-    ]}))
+    p.write_text(
+        json.dumps(
+            {
+                "models": [
+                    {
+                        "model_id": "x/y",
+                        "provider": "x",
+                        "display_name": "A",
+                        "context_window": 1000,
+                        "input_price": 0.0,
+                        "output_price": 0.0,
+                        "is_free": True,
+                        "tier_rank": 1,
+                        "strength_tags": [],
+                        "weakness_tags": [],
+                        "best_for": [],
+                        "performance_score": 50.0,
+                    },
+                    {
+                        "model_id": "x/y",
+                        "provider": "x",
+                        "display_name": "B",
+                        "context_window": 1000,
+                        "input_price": 0.0,
+                        "output_price": 0.0,
+                        "is_free": True,
+                        "tier_rank": 1,
+                        "strength_tags": [],
+                        "weakness_tags": [],
+                        "best_for": [],
+                        "performance_score": 50.0,
+                    },
+                ]
+            }
+        )
+    )
     report = validate_models_json(p)
     assert not report.ok
     assert any("duplicate" in e for e in report.errors)
@@ -120,9 +160,15 @@ def test_duplicate_model_id_errors(tmp_path: Path) -> None:
 
 def test_missing_required_field_errors(tmp_path: Path) -> None:
     p = tmp_path / "missing.json"
-    p.write_text(json.dumps({"models": [
-        {"model_id": "x/y"},  # missing everything else
-    ]}))
+    p.write_text(
+        json.dumps(
+            {
+                "models": [
+                    {"model_id": "x/y"},  # missing everything else
+                ]
+            }
+        )
+    )
     report = validate_models_json(p)
     assert not report.ok
     assert any("missing fields" in e for e in report.errors)
@@ -130,18 +176,35 @@ def test_missing_required_field_errors(tmp_path: Path) -> None:
 
 def test_is_free_not_bool_errors(tmp_path: Path) -> None:
     p = tmp_path / "bad_is_free.json"
-    p.write_text(json.dumps({"models": [
-        {"model_id": "x/y", "provider": "x", "display_name": "Y",
-         "context_window": 1000, "input_price": 0.0, "output_price": 0.0,
-         "is_free": "yes", "tier_rank": 1, "strength_tags": [],
-         "weakness_tags": [], "best_for": [], "performance_score": 50.0},
-    ]}))
+    p.write_text(
+        json.dumps(
+            {
+                "models": [
+                    {
+                        "model_id": "x/y",
+                        "provider": "x",
+                        "display_name": "Y",
+                        "context_window": 1000,
+                        "input_price": 0.0,
+                        "output_price": 0.0,
+                        "is_free": "yes",
+                        "tier_rank": 1,
+                        "strength_tags": [],
+                        "weakness_tags": [],
+                        "best_for": [],
+                        "performance_score": 50.0,
+                    },
+                ]
+            }
+        )
+    )
     report = validate_models_json(p)
     assert not report.ok
     assert any("is_free" in e for e in report.errors)
 
 
 # --- validate_redis ---
+
 
 def test_redis_unreachable_warns(monkeypatch: pytest.MonkeyPatch) -> None:
     """If Redis is down (default in this env), the report gets a warning."""
@@ -152,6 +215,7 @@ def test_redis_unreachable_warns(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # --- validate_all ---
+
 
 def test_validate_all_against_real_repo() -> None:
     """Smoke: validate_all() against the actual repo files doesn't crash.

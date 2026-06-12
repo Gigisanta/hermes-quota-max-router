@@ -18,15 +18,15 @@ Exit codes:
   2  router reachable but in stub mode (no upstream keys)
   3  chat completion returned an error
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import logging
 import os
-import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -42,14 +42,14 @@ def _get_base_url() -> str:
 
 
 def _is_stub_response(body: dict) -> bool:
-    content = (body.get("choices", [{}])[0].get("message", {}).get("content") or "")
+    content = body.get("choices", [{}])[0].get("message", {}).get("content") or ""
     return content.startswith("[stub:") or content.startswith("[Stub mode")
 
 
 def _alert(level: str, check: str, message: str, **details: object) -> None:
     ALERTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     record = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "level": level,
         "check": check,
         "message": message,
@@ -78,9 +78,13 @@ def run_once(base_url: str | None = None) -> int:
     except httpx.HTTPError as exc:
         _alert("error", "liveness", f"GET /router/health failed: {exc}")
         return 1
-    log.info("liveness OK: status=%s version=%s models=%d live=%s",
-             health.get("status"), health.get("version"),
-             health.get("models_count"), health.get("live_mode"))
+    log.info(
+        "liveness OK: status=%s version=%s models=%d live=%s",
+        health.get("status"),
+        health.get("version"),
+        health.get("models_count"),
+        health.get("live_mode"),
+    )
     if health.get("status") != "ok":
         _alert("error", "liveness", "router status not 'ok'", **health)
         overall_ok = False
@@ -105,12 +109,12 @@ def run_once(base_url: str | None = None) -> int:
     is_stub = _is_stub_response(body)
     used = body.get("model", "<unknown>")
     u = body.get("usage", {}) or {}
-    log.info("chat OK: model=%s tokens=%d stub=%s",
-             used, u.get("total_tokens", 0), is_stub)
+    log.info("chat OK: model=%s tokens=%d stub=%s", used, u.get("total_tokens", 0), is_stub)
 
     if is_stub:
         _alert(
-            "warning", "chat",
+            "warning",
+            "chat",
             "Router is in STUB mode (no live upstream keys).",
             content_preview=content[:120],
             live_mode=health.get("live_mode"),
@@ -126,8 +130,7 @@ def run_once(base_url: str | None = None) -> int:
 
 
 def run_daemon(interval_s: int) -> int:
-    log.info("starting healthcheck daemon, interval=%ds, base=%s",
-             interval_s, _get_base_url())
+    log.info("starting healthcheck daemon, interval=%ds, base=%s", interval_s, _get_base_url())
     while True:
         rc = run_once()
         if rc not in (0, 2):  # 0=ok, 2=stub are not fatal in daemon
@@ -137,14 +140,17 @@ def run_daemon(interval_s: int) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(description="QuotaMax Router self-test")
-    p.add_argument("--once", action="store_true",
-                   help="Run a single check and exit (default)")
-    p.add_argument("--daemon", action="store_true",
-                   help="Run forever, checking every N seconds")
-    p.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_S,
-                   help=f"Interval in seconds (default: {DEFAULT_INTERVAL_S} = 6h)")
-    p.add_argument("--base-url", default=None,
-                   help="Router base URL (default: $QUOTAMAX_BASE_URL or 127.0.0.1:8088)")
+    p.add_argument("--once", action="store_true", help="Run a single check and exit (default)")
+    p.add_argument("--daemon", action="store_true", help="Run forever, checking every N seconds")
+    p.add_argument(
+        "--interval",
+        type=int,
+        default=DEFAULT_INTERVAL_S,
+        help=f"Interval in seconds (default: {DEFAULT_INTERVAL_S} = 6h)",
+    )
+    p.add_argument(
+        "--base-url", default=None, help="Router base URL (default: $QUOTAMAX_BASE_URL or 127.0.0.1:8088)"
+    )
     args = p.parse_args()
 
     logging.basicConfig(

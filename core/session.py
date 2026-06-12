@@ -14,6 +14,7 @@ of the previous turn. If the user is mid-conversation with deepseek,
 the next turn doesn't need to re-orchestrate from scratch — a cheap
 "continue with same model" path keeps the conversation coherent.
 """
+
 from __future__ import annotations
 
 import threading
@@ -51,18 +52,19 @@ class SessionContext:
         self.created_at: float = time.time()
         self._lock = threading.Lock()
 
-    def append(self, role: str, content: str, model_used: str | None = None,
-               tokens: int = 0) -> None:
+    def append(self, role: str, content: str, model_used: str | None = None, tokens: int = 0) -> None:
         with self._lock:
-            self.history.append(TurnRecord(
-                role=role, content=content,
-                model_used=model_used, tokens=tokens,
-            ))
+            self.history.append(
+                TurnRecord(
+                    role=role,
+                    content=content,
+                    model_used=model_used,
+                    tokens=tokens,
+                )
+            )
             if role == "assistant" and model_used:
                 self.last_model = model_used
-                self.quota_consumed[model_used] = (
-                    self.quota_consumed.get(model_used, 0) + tokens
-                )
+                self.quota_consumed[model_used] = self.quota_consumed.get(model_used, 0) + tokens
             if role == "user":
                 self.turn_count += 1
 

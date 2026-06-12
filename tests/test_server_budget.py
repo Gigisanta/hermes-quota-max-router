@@ -1,4 +1,5 @@
 """Server tests for Phase 15: budget endpoint + reset_quotas integration."""
+
 from fastapi.testclient import TestClient
 
 from server.app import build_app
@@ -8,9 +9,12 @@ def test_budget_endpoint_returns_burn_rates() -> None:
     app = build_app(live=False)
     with TestClient(app) as c:
         # Trigger a call
-        c.post("/v1/chat/completions", json={
-            "messages": [{"role": "user", "content": "Refactor Python"}],
-        })
+        c.post(
+            "/v1/chat/completions",
+            json={
+                "messages": [{"role": "user", "content": "Refactor Python"}],
+            },
+        )
         r = c.get("/v1/router/budget")
     assert r.status_code == 200
     body = r.json()
@@ -32,9 +36,12 @@ def test_budget_endpoint_after_heavy_use_shows_status() -> None:
         # The simplest way is via the test client: just make calls
         # and check that the endpoint surfaces status correctly.
         for i in range(3):
-            c.post("/v1/chat/completions", json={
-                "messages": [{"role": "user", "content": f"Refactor #{i}"}],
-            })
+            c.post(
+                "/v1/chat/completions",
+                json={
+                    "messages": [{"role": "user", "content": f"Refactor #{i}"}],
+                },
+            )
         r = c.get("/v1/router/budget")
     body = r.json()
     # At least one model should be in "ok" or above

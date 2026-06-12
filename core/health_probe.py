@@ -47,19 +47,20 @@ deployments. For now, the orchestrator's scoring + the auto-updater
 re-fetches the catalog every 48-72h, which is good enough to recover
 from a stale local state.
 """
+
 from __future__ import annotations
 
 import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 
 log = logging.getLogger(__name__)
 
 
-class HealthState(str, Enum):
+class HealthState(StrEnum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"  # cooldown active, skip
@@ -75,6 +76,7 @@ class ModelHealth:
     - ``cooldown_until_monotonic`` is the deadline in ``time.monotonic()``
       seconds (for fast, clock-skew-free comparison in ``is_available``).
     """
+
     model_id: str
     state: HealthState = HealthState.HEALTHY
     consecutive_failures: int = 0
@@ -91,7 +93,7 @@ class ModelHealth:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -114,6 +116,7 @@ class HealthProbe:
         transient_count_threshold: number of failures in the rolling
             window to also flip to UNHEALTHY.
     """
+
     failure_threshold: int = 3
     recovery_threshold: int = 1
     cooldown_s: float = 300.0
@@ -222,22 +225,19 @@ class HealthProbe:
                 # Threshold check 1: N consecutive (regardless of current
                 # state — DEGRADED can also escalate to UNHEALTHY).
                 if h.consecutive_failures >= self.failure_threshold and h.state in (
-                    HealthState.HEALTHY, HealthState.DEGRADED,
+                    HealthState.HEALTHY,
+                    HealthState.DEGRADED,
                 ):
-                    self._trip_to_unhealthy(
-                        h, reason=f"{h.consecutive_failures} consecutive failures"
-                    )
+                    self._trip_to_unhealthy(h, reason=f"{h.consecutive_failures} consecutive failures")
                     return
                 # Threshold check 2: N in M seconds
-                if (
-                    len(log_list) >= self.transient_count_threshold
-                    and h.state in (HealthState.HEALTHY, HealthState.DEGRADED)
+                if len(log_list) >= self.transient_count_threshold and h.state in (
+                    HealthState.HEALTHY,
+                    HealthState.DEGRADED,
                 ):
                     self._trip_to_unhealthy(
                         h,
-                        reason=(
-                            f"{len(log_list)} failures in {self.transient_window_s:.0f}s"
-                        ),
+                        reason=(f"{len(log_list)} failures in {self.transient_window_s:.0f}s"),
                     )
                     return
                 # First transient failure from HEALTHY → DEGRADED (so
@@ -288,11 +288,14 @@ class HealthProbe:
         h.cooldown_until_monotonic = now + cooldown
         # Also record the wall-clock equivalent for the API surface.
         h.cooldown_until = datetime.fromtimestamp(
-            time.time() + cooldown, tz=timezone.utc,
+            time.time() + cooldown,
+            tz=UTC,
         ).isoformat()
         log.warning(
             "model %s: → UNHEALTHY (cooldown %.0fs, reason: %s)",
-            h.model_id, cooldown, reason,
+            h.model_id,
+            cooldown,
+            reason,
         )
 
 

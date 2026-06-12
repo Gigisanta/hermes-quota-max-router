@@ -1,35 +1,71 @@
 """Tests for cost tracking (Phase 13)."""
+
 import pytest
 
 from core.cost_tracker import CostTracker, compute_cost_usd
 from core.model_registry import ModelRegistry
-from core.schemas import RoutingDecision
 
 
 @pytest.fixture
 def registry_with_prices(tmp_path) -> ModelRegistry:
     import json
+
     seed = tmp_path / "seed.json"
-    seed.write_text(json.dumps({
-        "models": [
-            {"model_id": "free/a", "provider": "f", "display_name": "FA",
-             "context_window": 1000, "input_price": 0.0, "output_price": 0.0,
-             "is_free": True, "tier_rank": 1, "strength_tags": [],
-             "weakness_tags": [], "best_for": [], "performance_score": 50.0},
-            {"model_id": "paid/b", "provider": "p", "display_name": "PB",
-             "context_window": 1000, "input_price": 0.00001, "output_price": 0.00003,
-             "is_free": False, "tier_rank": 99, "strength_tags": [],
-             "weakness_tags": [], "best_for": [], "performance_score": 90.0},
-            {"model_id": "paid/c", "provider": "p", "display_name": "PC",
-             "context_window": 1000, "input_price": 0.000005, "output_price": 0.000015,
-             "is_free": False, "tier_rank": 99, "strength_tags": [],
-             "weakness_tags": [], "best_for": [], "performance_score": 95.0},
-        ]
-    }))
+    seed.write_text(
+        json.dumps(
+            {
+                "models": [
+                    {
+                        "model_id": "free/a",
+                        "provider": "f",
+                        "display_name": "FA",
+                        "context_window": 1000,
+                        "input_price": 0.0,
+                        "output_price": 0.0,
+                        "is_free": True,
+                        "tier_rank": 1,
+                        "strength_tags": [],
+                        "weakness_tags": [],
+                        "best_for": [],
+                        "performance_score": 50.0,
+                    },
+                    {
+                        "model_id": "paid/b",
+                        "provider": "p",
+                        "display_name": "PB",
+                        "context_window": 1000,
+                        "input_price": 0.00001,
+                        "output_price": 0.00003,
+                        "is_free": False,
+                        "tier_rank": 99,
+                        "strength_tags": [],
+                        "weakness_tags": [],
+                        "best_for": [],
+                        "performance_score": 90.0,
+                    },
+                    {
+                        "model_id": "paid/c",
+                        "provider": "p",
+                        "display_name": "PC",
+                        "context_window": 1000,
+                        "input_price": 0.000005,
+                        "output_price": 0.000015,
+                        "is_free": False,
+                        "tier_rank": 99,
+                        "strength_tags": [],
+                        "weakness_tags": [],
+                        "best_for": [],
+                        "performance_score": 95.0,
+                    },
+                ]
+            }
+        )
+    )
     return ModelRegistry(db_path=tmp_path / "r.sqlite", seed_path=seed)
 
 
 # --- compute_cost_usd ---
+
 
 def test_compute_cost_free_is_zero(registry_with_prices: ModelRegistry) -> None:
     cost = compute_cost_usd(registry_with_prices, "free/a", 1_000_000, 1_000_000)
@@ -60,6 +96,7 @@ def test_compute_cost_zero_tokens(registry_with_prices: ModelRegistry) -> None:
 
 
 # --- CostTracker ---
+
 
 def test_tracker_starts_empty() -> None:
     t = CostTracker()

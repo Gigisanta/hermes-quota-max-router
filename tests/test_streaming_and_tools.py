@@ -1,4 +1,5 @@
 """Iter 13 — Streaming and tool-calling in /v1/chat/completions."""
+
 from __future__ import annotations
 
 import json

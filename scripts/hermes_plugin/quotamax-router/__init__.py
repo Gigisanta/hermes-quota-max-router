@@ -18,6 +18,7 @@ After install:
     $ hermes providers list   # should show "quotamax-router"
     $ hermes models           # should list quotamax-router/<model> entries
 """
+
 from __future__ import annotations
 
 import logging
@@ -90,6 +91,7 @@ class QuotaMaxRouterProfile(ProviderProfile):
         try:
             import json
             import urllib.request
+
             req = urllib.request.Request(url)
             req.add_header("Accept", "application/json")
             req.add_header("User-Agent", "hermes-cli/quotamax-router-plugin")
@@ -103,7 +105,7 @@ class QuotaMaxRouterProfile(ProviderProfile):
                 self._cached_models = ids
                 logger.info("quotamax-router: discovered %d models from %s", len(ids), url)
                 return ids
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("quotamax-router: live fetch failed (%s); using static fallback", exc)
         # Static fallback so the picker has *something* to show.
         return list(_FALLBACK_FREE_MODELS)

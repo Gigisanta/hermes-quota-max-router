@@ -17,12 +17,13 @@ Three operational scripts, all idempotent and safe to re-run:
 All scripts use the same Redis-or-fakeredis fallback as the rest of
 the system, so they work in dev with zero infrastructure.
 """
+
 from __future__ import annotations
 
 import json
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -38,7 +39,7 @@ def cmd_reset_quotas() -> int:
     qm = QuotaManager()
     qm.sync_from_registry(reg)
     n = qm.reset_all()
-    print(f"[reset_quotas] reset {n} models at {datetime.now(timezone.utc).isoformat()}")
+    print(f"[reset_quotas] reset {n} models at {datetime.now(UTC).isoformat()}")
     return 0
 
 
@@ -55,15 +56,16 @@ def cmd_auto_update(feed_path: str) -> int:
       - registry/models.json (curated + discovered merged)
     The curated seed itself is never mutated.
     """
-    from core.model_registry import ModelRegistry
     from core.auto_updater import LocalFeedProvider, RegistryUpdater
     from core.layered_registry import DISCOVERED_PATH
+    from core.model_registry import ModelRegistry
 
     path = Path(feed_path)
     feed_models: list[dict]
 
     if feed_path in ("live", "discover", ":live", ":discover"):
         from core.remote_feeds import RemoteFeedProvider
+
         provider = RemoteFeedProvider(timeout_s=20.0)
         feed_models = provider.fetch_all()
         print(f"[auto_update] live discovery: {len(feed_models)} models from remote catalogs")
@@ -81,15 +83,18 @@ def cmd_auto_update(feed_path: str) -> int:
     updater = RegistryUpdater(discovered_registry, DISCOVERED_PATH)
     result = updater.apply_feed(feed_models)
     print(f"[auto_update] version: {result.old_version} → {result.new_version}")
-    print(f"[auto_update] discovered.json: {len(result.added)} added, "
-          f"{len(result.updated)} updated, {len(result.unchanged)} unchanged")
+    print(
+        f"[auto_update] discovered.json: {len(result.added)} added, "
+        f"{len(result.updated)} updated, {len(result.unchanged)} unchanged"
+    )
     if result.errors:
         print(f"[auto_update] errors: {result.errors}", file=sys.stderr)
         return 2
 
     # Also dump a snapshot of the merged registry (curated + discovered)
     # to a separate file for visibility.
-    from core.layered_registry import LayeredRegistry, CURATED_PATH
+    from core.layered_registry import CURATED_PATH, LayeredRegistry
+
     layered = LayeredRegistry.from_defaults(CURATED_PATH, DISCOVERED_PATH)
     merged_path = REPO_ROOT / "registry" / "merged.json"
     with open(merged_path, "w") as f:
@@ -101,7 +106,8 @@ def cmd_auto_update(feed_path: str) -> int:
                 "merged_count": layered.count(),
                 "models": [m.to_dict() for m in layered.all()],
             },
-            f, indent=2,
+            f,
+            indent=2,
         )
     print(f"[auto_update] merged snapshot: {merged_path} ({layered.count()} models)")
     return 0
@@ -150,7 +156,7 @@ def cmd_usage_report(log_path: str = "logs/router.jsonl") -> int:
             total_duration += float(rec.get("duration_s", 0.0))
 
     print(f"=== Usage report ({n} calls) ===")
-    print(f"Generated: {datetime.now(timezone.utc).isoformat()}")
+    print(f"Generated: {datetime.now(UTC).isoformat()}")
     print(f"Fallbacks used: {fallbacks}")
     print(f"Paid-quota calls (preserve_paid_quota=false): {paid_calls}")
     if n:

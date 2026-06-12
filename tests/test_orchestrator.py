@@ -1,20 +1,18 @@
 """Tests for the Rule-Based Orchestrator."""
-import json
+
 from pathlib import Path
 
-import pytest
 import fakeredis
+import pytest
 
 from core.model_registry import ModelRegistry
-from core.quota_manager import QuotaManager
 from core.orchestrator import (
     RuleBasedOrchestrator,
-    _score_candidate,
     _tag_overlap,
 )
+from core.quota_manager import QuotaManager
 from core.schemas import TaskAnalysis
 from core.task_analyzer import HeuristicTaskAnalyzer
-
 
 SEED_PATH = Path(__file__).resolve().parent.parent / "registry" / "models.json"
 
@@ -47,14 +45,16 @@ def orch() -> RuleBasedOrchestrator:
 
 # --- pure helpers ---
 
+
 def test_tag_overlap_jaccard() -> None:
-    assert _tag_overlap(["a", "b", "c"], ["a", "b"]) == pytest.approx(2/3)
+    assert _tag_overlap(["a", "b", "c"], ["a", "b"]) == pytest.approx(2 / 3)
     assert _tag_overlap([], ["a"]) == 0.0
     assert _tag_overlap(["a"], []) == 0.0
     assert _tag_overlap(["a", "b"], ["a", "b"]) == 1.0
 
 
 # --- routing decisions ---
+
 
 def test_code_task_routes_to_deepseek(
     orch: RuleBasedOrchestrator,
@@ -155,8 +155,13 @@ def test_critical_quality_can_escalate_to_paid(
 ) -> None:
     # Construct a request that no free model is great at
     a = TaskAnalysis(
-        required_tags=["deep_reasoning", "agentic_god", "instruction_following_god",
-                        "json_mode_perfect", "structured_output"],
+        required_tags=[
+            "deep_reasoning",
+            "agentic_god",
+            "instruction_following_god",
+            "json_mode_perfect",
+            "structured_output",
+        ],
         estimated_input_tokens=5000,
         estimated_output_tokens=10000,
         min_quality="exceptional",
@@ -220,8 +225,7 @@ def test_moa_strategy_for_heavy_task(
     qm: QuotaManager,
 ) -> None:
     a = TaskAnalysis(
-        required_tags=["deep_reasoning", "agentic_god", "tool_master",
-                        "research_master", "long_coherence"],
+        required_tags=["deep_reasoning", "agentic_god", "tool_master", "research_master", "long_coherence"],
         min_quality="very_high",
         task_type="research",
         estimated_input_tokens=10_000,

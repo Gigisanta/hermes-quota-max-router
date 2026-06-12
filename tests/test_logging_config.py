@@ -1,4 +1,5 @@
 """Tests for the iter 15 JSON structured logging."""
+
 from __future__ import annotations
 
 import io
@@ -46,7 +47,8 @@ def test_json_formatter_basic(captured_log: io.StringIO) -> None:
 
 def test_json_formatter_extra_fields(captured_log: io.StringIO) -> None:
     logging.getLogger("test.json").info(
-        "model picked", extra={"model_id": "deepseek/deepseek-r1-0528", "tokens": 1234},
+        "model picked",
+        extra={"model_id": "deepseek/deepseek-r1-0528", "tokens": 1234},
     )
     obj = json.loads(captured_log.getvalue().strip())
     assert obj["model_id"] == "deepseek/deepseek-r1-0528"
@@ -68,6 +70,7 @@ def test_json_formatter_repr_for_non_serializable(captured_log: io.StringIO) -> 
     class _Opaque:
         def __repr__(self) -> str:
             return "<opaque>"
+
     logging.getLogger("test.json").info("x", extra={"obj": _Opaque()})
     obj = json.loads(captured_log.getvalue().strip())
     assert obj["obj"] == "<opaque>"

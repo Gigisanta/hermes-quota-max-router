@@ -1,10 +1,9 @@
 """Tests for SessionContext and SessionManager (Phase 12)."""
-import pytest
 
 from core.session import SessionContext, SessionManager
 
-
 # --- SessionContext ---
+
 
 def test_session_appends_user_and_assistant() -> None:
     s = SessionContext("s1")
@@ -66,6 +65,7 @@ def test_session_summary() -> None:
 
 # --- SessionManager ---
 
+
 def test_get_or_create_returns_same_session() -> None:
     m = SessionManager()
     a = m.get_or_create("s1")
@@ -118,6 +118,7 @@ def test_all_summaries() -> None:
 def test_thread_safe_concurrent_get_or_create() -> None:
     """Multiple threads racing on the same session_id should all get the same."""
     import threading
+
     m = SessionManager()
     results: list[SessionContext] = []
     lock = threading.Lock()

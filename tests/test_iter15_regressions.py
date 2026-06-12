@@ -7,16 +7,13 @@ a failure mode the OSS community would expect to be handled correctly.
 Coverage: rate-limit 429, request timeout, malformed JSON, very long
 prompt, concurrent requests.
 """
-from __future__ import annotations
 
-import asyncio
-import json
+from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
 
 from server.app import build_app
-
 
 # --- 1. Rate limit returns 429 after burst ---
 
@@ -112,6 +109,7 @@ def test_concurrent_requests_all_succeed() -> None:
     must all return 200. Exercises thread-safety in the rate limiter,
     quota manager, registry, and RouterEngine."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
     app = build_app(live=False)
 
     def fire(i: int) -> int:
@@ -136,6 +134,7 @@ def test_unhealthy_model_returns_circuit_breaker_error() -> None:
     that model directly should return an error indicating the circuit
     is open, not a generic 200 from the stub."""
     from core.health_probe import HealthProbe, HealthState
+
     probe = HealthProbe()
     # Mark a model as UNHEALTHY by recording 3 transient failures
     for _ in range(3):
@@ -154,7 +153,7 @@ def test_unhealthy_model_returns_circuit_breaker_error() -> None:
     # The router should still return 200 because the orchestrator's
     # fallback model is healthy, but the response should indicate
     # the unhealthy model was the primary (router_error or similar).
-    body = r.json()
+    r.json()  # must parse as JSON
     # Either the response succeeded via fallback (200 with the fallback
     # model's content), or the request failed with a clear error.
     # We don't assert on the exact outcome — the point is that the
@@ -170,6 +169,7 @@ def test_health_endpoint_includes_unhealthy_models() -> None:
     models so operators can see which free models are currently
     being skipped (the radar's observability surface)."""
     from core.health_probe import HealthProbe
+
     probe = HealthProbe()
     for _ in range(3):
         probe.record_failure("a/bad-model", transient=True, error="timeout")

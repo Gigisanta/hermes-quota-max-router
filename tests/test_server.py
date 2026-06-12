@@ -3,6 +3,7 @@
 Uses FastAPI's TestClient (sync over httpx) to exercise endpoints.
 The router is in `live=False` mode so no network is hit.
 """
+
 from fastapi.testclient import TestClient
 
 from server.app import build_app
@@ -45,11 +46,14 @@ def test_quota_endpoint_returns_per_model() -> None:
 def test_chat_completion_routes_to_free_model() -> None:
     app = build_app(live=False)
     with TestClient(app) as client:
-        r = client.post("/v1/chat/completions", json={
-            "messages": [
-                {"role": "user", "content": "Refactor this Python function and add tests"},
-            ],
-        })
+        r = client.post(
+            "/v1/chat/completions",
+            json={
+                "messages": [
+                    {"role": "user", "content": "Refactor this Python function and add tests"},
+                ],
+            },
+        )
     assert r.status_code == 200
     body = r.json()
     assert "choices" in body
@@ -68,10 +72,13 @@ def test_chat_completion_routes_to_free_model() -> None:
 def test_chat_completion_with_explicit_model() -> None:
     app = build_app(live=False)
     with TestClient(app) as client:
-        r = client.post("/v1/chat/completions", json={
-            "model": "openai-codex/gpt-5.5",
-            "messages": [{"role": "user", "content": "hello"}],
-        })
+        r = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "openai-codex/gpt-5.5",
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
     assert r.status_code == 200
     body = r.json()
     assert body["model"] == "openai-codex/gpt-5.5"
@@ -90,9 +97,12 @@ def test_metrics_endpoint_increments() -> None:
     with TestClient(app) as client:
         # Make 2 calls
         for msg in ["Refactor Python", "Write a story"]:
-            client.post("/v1/chat/completions", json={
-                "messages": [{"role": "user", "content": msg}],
-            })
+            client.post(
+                "/v1/chat/completions",
+                json={
+                    "messages": [{"role": "user", "content": msg}],
+                },
+            )
         r = client.get("/v1/router/metrics")
     assert r.status_code == 200
     body = r.text
@@ -104,9 +114,12 @@ def test_metrics_endpoint_increments() -> None:
 def test_metrics_have_prometheus_format() -> None:
     app = build_app(live=False)
     with TestClient(app) as client:
-        client.post("/v1/chat/completions", json={
-            "messages": [{"role": "user", "content": "test"}],
-        })
+        client.post(
+            "/v1/chat/completions",
+            json={
+                "messages": [{"role": "user", "content": "test"}],
+            },
+        )
         r = client.get("/v1/router/metrics")
     body = r.text
     # Each line should be either a counter, gauge, or empty
@@ -115,8 +128,12 @@ def test_metrics_have_prometheus_format() -> None:
             continue
         assert any(
             line.startswith(prefix)
-            for prefix in ("router_calls_total", "router_tokens_total",
-                          "router_errors_total", "router_call_duration_seconds")
+            for prefix in (
+                "router_calls_total",
+                "router_tokens_total",
+                "router_errors_total",
+                "router_call_duration_seconds",
+            )
         ), f"unexpected line: {line}"
 
 
@@ -124,9 +141,12 @@ def test_response_shape_matches_openai() -> None:
     """Sanity: the response has the exact OpenAI field names."""
     app = build_app(live=False)
     with TestClient(app) as client:
-        r = client.post("/v1/chat/completions", json={
-            "messages": [{"role": "user", "content": "hi"}],
-        })
+        r = client.post(
+            "/v1/chat/completions",
+            json={
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
     body = r.json()
     required = {"id", "object", "created", "model", "choices", "usage"}
     assert required <= set(body.keys())

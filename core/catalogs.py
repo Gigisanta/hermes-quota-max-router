@@ -20,11 +20,12 @@ Each catalog row has:
   - `parser`: how to turn JSON into list[dict] matching our Model schema
   - `free_filter`: optional selector for "free tier only" entries
 """
+
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
 
 log = logging.getLogger(__name__)
 
@@ -44,12 +45,12 @@ class CatalogEntry:
 # returns a list of dicts matching registry/models.json schema. We
 # normalize on the fly: convert prices, default missing fields, etc.
 
+
 def _normalize(raw: dict, defaults: dict) -> dict:
     """Merge raw + defaults + computed fields into a Model dict."""
     out = {**defaults, **raw}
     # Type coercions
-    for k in ("context_window", "tier_rank", "daily_quota_tokens",
-              "current_remaining_tokens"):
+    for k in ("context_window", "tier_rank", "daily_quota_tokens", "current_remaining_tokens"):
         if k in out and out[k] is not None:
             try:
                 out[k] = int(out[k])
@@ -74,6 +75,7 @@ def _normalize(raw: dict, defaults: dict) -> dict:
 # https://openrouter.ai/api/v1/models — returns all models, with `pricing`
 # in USD per token as strings, and `id` like "vendor/model-name".
 # Many entries have `id` ending in `:free` for the no-cost tier.
+
 
 def _parse_openrouter(data: dict) -> list[dict]:
     out: list[dict] = []
@@ -103,32 +105,37 @@ def _parse_openrouter(data: dict) -> list[dict]:
             strength.append("multimodal")
         if is_free:
             strength.append("cheap_parallel")
-        out.append(_normalize({
-            "model_id": mid,
-            "provider": mid.split("/")[0] if "/" in mid else "openrouter",
-            "display_name": m.get("name", mid),
-            "context_window": ctx,
-            "input_price": prompt,
-            "output_price": completion,
-            "is_free": is_free,
-            # OpenRouter has many models; start tier_rank at 10 to slot
-            # below our curated 1-6. Auto-Updater will re-rank on merge.
-            "tier_rank": 10,
-            "daily_quota_tokens": 10_000_000 if is_free else None,
-            "strength_tags": strength,
-            "best_for": [m.get("description", "").split(".")[0][:80] or "general"],
-            "performance_score": 80.0 if is_free else 88.0,
-            "notes": f"[auto-discovery] openrouter:{mid}",
-        }, defaults={
-            "strength_tags": [],
-            "weakness_tags": [],
-            "best_for": [],
-            "performance_score": 75.0,
-            "is_free": False,
-            "context_window": 8192,
-            "input_price": 0.0,
-            "output_price": 0.0,
-        }))
+        out.append(
+            _normalize(
+                {
+                    "model_id": mid,
+                    "provider": mid.split("/")[0] if "/" in mid else "openrouter",
+                    "display_name": m.get("name", mid),
+                    "context_window": ctx,
+                    "input_price": prompt,
+                    "output_price": completion,
+                    "is_free": is_free,
+                    # OpenRouter has many models; start tier_rank at 10 to slot
+                    # below our curated 1-6. Auto-Updater will re-rank on merge.
+                    "tier_rank": 10,
+                    "daily_quota_tokens": 10_000_000 if is_free else None,
+                    "strength_tags": strength,
+                    "best_for": [m.get("description", "").split(".")[0][:80] or "general"],
+                    "performance_score": 80.0 if is_free else 88.0,
+                    "notes": f"[auto-discovery] openrouter:{mid}",
+                },
+                defaults={
+                    "strength_tags": [],
+                    "weakness_tags": [],
+                    "best_for": [],
+                    "performance_score": 75.0,
+                    "is_free": False,
+                    "context_window": 8192,
+                    "input_price": 0.0,
+                    "output_price": 0.0,
+                },
+            )
+        )
     return out
 
 
@@ -137,6 +144,7 @@ def _parse_openrouter(data: dict) -> list[dict]:
 # Returns a list of model metadata. Free if `inference_provider` is set
 # AND the model is NOT marked private/gated. We DON'T mark every HF
 # model as free by default — gated or paid-inference models get is_free=False.
+
 
 def _parse_huggingface(data: list | dict) -> list[dict]:
     if isinstance(data, dict):
@@ -169,30 +177,35 @@ def _parse_huggingface(data: list | dict) -> list[dict]:
                 mapped.extend(["vision_master", "multimodal"])
             if "long-context" in tt or "32k" in tt or "128k" in tt:
                 mapped.append("long_context_king")
-        out.append(_normalize({
-            "model_id": f"hf/{mid}",
-            "provider": "huggingface",
-            "display_name": mid,
-            "context_window": 8192,
-            "input_price": 0.0,
-            "output_price": 0.0,
-            "is_free": is_free,
-            "tier_rank": 20,  # below our 1-6 and OpenRouter's 10
-            "daily_quota_tokens": 1_000_000 if is_free else 0,
-            "strength_tags": mapped[:6] if mapped else (["high_volume"] if is_free else []),
-            "best_for": ["experimental", "research"] if is_free else [],
-            "performance_score": 70.0 if is_free else 50.0,
-            "notes": f"[auto-discovery] huggingface:{mid}{' (gated)' if is_gated else ''}",
-        }, defaults={
-            "strength_tags": [],
-            "weakness_tags": ["experimental"] if is_free else [],
-            "best_for": [],
-            "performance_score": 70.0,
-            "is_free": False,
-            "context_window": 8192,
-            "input_price": 0.0,
-            "output_price": 0.0,
-        }))
+        out.append(
+            _normalize(
+                {
+                    "model_id": f"hf/{mid}",
+                    "provider": "huggingface",
+                    "display_name": mid,
+                    "context_window": 8192,
+                    "input_price": 0.0,
+                    "output_price": 0.0,
+                    "is_free": is_free,
+                    "tier_rank": 20,  # below our 1-6 and OpenRouter's 10
+                    "daily_quota_tokens": 1_000_000 if is_free else 0,
+                    "strength_tags": mapped[:6] if mapped else (["high_volume"] if is_free else []),
+                    "best_for": ["experimental", "research"] if is_free else [],
+                    "performance_score": 70.0 if is_free else 50.0,
+                    "notes": f"[auto-discovery] huggingface:{mid}{' (gated)' if is_gated else ''}",
+                },
+                defaults={
+                    "strength_tags": [],
+                    "weakness_tags": ["experimental"] if is_free else [],
+                    "best_for": [],
+                    "performance_score": 70.0,
+                    "is_free": False,
+                    "context_window": 8192,
+                    "input_price": 0.0,
+                    "output_price": 0.0,
+                },
+            )
+        )
     return out
 
 
@@ -200,6 +213,7 @@ def _parse_huggingface(data: list | dict) -> list[dict]:
 # These mirror the spec's "June 2026" table. The auto-updater can
 # fall back to them when the network is down. The schema matches
 # registry/models.json exactly.
+
 
 def _parse_static_curated(data: dict) -> list[dict]:
     return data.get("models", [])
@@ -219,10 +233,7 @@ CATALOGS: list[CatalogEntry] = [
     ),
     CatalogEntry(
         name="huggingface_warm",
-        endpoint=(
-            "https://huggingface.co/api/models?inference=warm"
-            "&filter=text-generation&limit=200"
-        ),
+        endpoint=("https://huggingface.co/api/models?inference=warm&filter=text-generation&limit=200"),
         parser=_parse_huggingface,
         notes=(
             "HuggingFace warm-inference models. Returns up to 200 entries; "

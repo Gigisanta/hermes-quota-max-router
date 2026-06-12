@@ -1,8 +1,8 @@
 """Tests for the iter 15 distributed RedisTokenBucket."""
+
 from __future__ import annotations
 
 import fakeredis
-import pytest
 
 from core.security import RedisTokenBucket, TokenBucket
 
@@ -12,7 +12,9 @@ def test_tokenbucket_satisfies_ratelimiter_protocol() -> None:
     for each other (the auth dependency uses the RateLimiter protocol)."""
     tb: TokenBucket = TokenBucket(capacity=5.0, refill_rate=0.0)
     rtb: RedisTokenBucket = RedisTokenBucket(
-        capacity=5.0, refill_rate=0.0, redis_client=fakeredis.FakeRedis(decode_responses=True),
+        capacity=5.0,
+        refill_rate=0.0,
+        redis_client=fakeredis.FakeRedis(decode_responses=True),
     )
     for limiter in (tb, rtb):
         # 5 requests succeed
@@ -25,7 +27,8 @@ def test_tokenbucket_satisfies_ratelimiter_protocol() -> None:
 def test_redis_tokenbucket_allow_consume() -> None:
     """With capacity=3, refill=0, the 4th request is rejected."""
     rtb = RedisTokenBucket(
-        capacity=3.0, refill_rate=0.0,
+        capacity=3.0,
+        refill_rate=0.0,
         redis_client=fakeredis.FakeRedis(decode_responses=True),
     )
     assert rtb.allow("client-a") is True
@@ -37,12 +40,13 @@ def test_redis_tokenbucket_allow_consume() -> None:
 def test_redis_tokenbucket_isolated_clients() -> None:
     """Two different keys have independent buckets."""
     rtb = RedisTokenBucket(
-        capacity=1.0, refill_rate=0.0,
+        capacity=1.0,
+        refill_rate=0.0,
         redis_client=fakeredis.FakeRedis(decode_responses=True),
     )
     assert rtb.allow("a") is True
     assert rtb.allow("a") is False  # exhausted
-    assert rtb.allow("b") is True   # independent
+    assert rtb.allow("b") is True  # independent
     assert rtb.allow("b") is False
 
 
@@ -55,8 +59,10 @@ def test_redis_tokenbucket_refills_over_time() -> None:
     3. After 50ms sleep (5 tokens refilled at 100/s), next call succeeds.
     """
     import time
+
     rtb = RedisTokenBucket(
-        capacity=2.0, refill_rate=100.0,
+        capacity=2.0,
+        refill_rate=100.0,
         redis_client=fakeredis.FakeRedis(decode_responses=True),
     )
     # Burst consumed
@@ -80,7 +86,8 @@ def test_redis_tokenbucket_refills_over_time() -> None:
 
 def test_redis_tokenbucket_reset_specific() -> None:
     rtb = RedisTokenBucket(
-        capacity=1.0, refill_rate=0.0,
+        capacity=1.0,
+        refill_rate=0.0,
         redis_client=fakeredis.FakeRedis(decode_responses=True),
     )
     assert rtb.allow("a") is True
@@ -93,13 +100,18 @@ def test_redis_tokenbucket_fails_open_when_redis_unavailable() -> None:
     """If the redis client raises (broken pipe, network), the limiter
     must FAIL OPEN (admit the request) so a Redis outage doesn't take
     down the entire API."""
+
     class _BrokenRedis:
         def evalsha(self, *args, **kwargs):
             raise OSError("connection lost")
+
         def script_load(self, *args, **kwargs):
             raise OSError("connection lost")
+
     rtb = RedisTokenBucket(
-        capacity=1.0, refill_rate=0.0, redis_client=_BrokenRedis(),
+        capacity=1.0,
+        refill_rate=0.0,
+        redis_client=_BrokenRedis(),
     )
     # Should NOT raise; should admit.
     assert rtb.allow("k") is True

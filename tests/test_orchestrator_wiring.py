@@ -4,12 +4,12 @@ Tests for ROUTER_ORCHESTRATOR_MODE env-driven wiring.
 These verify the three orchestrator modes (rule, llm, moa) are actually
 instantiated by build_app() based on env, with sane defaults.
 """
+
 from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
 
-from core.orchestrator import LLMOrchestrator, RuleBasedOrchestrator
 from server.app import build_app
 
 
@@ -17,8 +17,11 @@ from server.app import build_app
 def client_default(monkeypatch):
     """build_app with default (no mode env) — should be rule-based, no MoA."""
     for v in (
-        "ROUTER_ORCHESTRATOR_MODE", "ROUTER_BRAIN_MODEL", "ROUTER_SYNTH_MODEL",
-        "ROUTER_MASTER_KEY", "ROUTER_LIVE",
+        "ROUTER_ORCHESTRATOR_MODE",
+        "ROUTER_BRAIN_MODEL",
+        "ROUTER_SYNTH_MODEL",
+        "ROUTER_MASTER_KEY",
+        "ROUTER_LIVE",
     ):
         monkeypatch.delenv(v, raising=False)
     monkeypatch.setenv("QUOTA_DB_DIR", "/tmp/test-orch-default")

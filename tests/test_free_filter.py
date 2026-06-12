@@ -6,6 +6,7 @@ These verify that:
   2. OpenRouter parser correctly identifies :free models
   3. The free-only filter helper does what it says
 """
+
 from __future__ import annotations
 
 from core.catalogs import _parse_huggingface, _parse_openrouter
@@ -46,21 +47,29 @@ class TestHuggingFaceFreeFilter:
 
 class TestOpenRouterFreeFilter:
     def test_explicit_free_suffix_marked_free(self):
-        data = {"data": [{
-            "id": "qwen/qwen-2.5-72b:free",
-            "pricing": {"prompt": "0", "completion": "0"},
-            "context_length": 32768,
-        }]}
+        data = {
+            "data": [
+                {
+                    "id": "qwen/qwen-2.5-72b:free",
+                    "pricing": {"prompt": "0", "completion": "0"},
+                    "context_length": 32768,
+                }
+            ]
+        }
         out = _parse_openrouter(data)
         assert len(out) == 1
         assert out[0]["is_free"] is True
 
     def test_paid_model_marked_not_free(self):
-        data = {"data": [{
-            "id": "anthropic/claude-3.5-sonnet",
-            "pricing": {"prompt": "0.000003", "completion": "0.000015"},
-            "context_length": 200000,
-        }]}
+        data = {
+            "data": [
+                {
+                    "id": "anthropic/claude-3.5-sonnet",
+                    "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+                    "context_length": 200000,
+                }
+            ]
+        }
         out = _parse_openrouter(data)
         assert len(out) == 1
         assert out[0]["is_free"] is False
@@ -68,11 +77,15 @@ class TestOpenRouterFreeFilter:
 
     def test_zero_pricing_without_free_suffix_still_marked_free(self):
         """Even without :free, a 0/0 pricing model is functionally free."""
-        data = {"data": [{
-            "id": "openai/gpt-oss-20b",
-            "pricing": {"prompt": "0", "completion": "0"},
-            "context_length": 8192,
-        }]}
+        data = {
+            "data": [
+                {
+                    "id": "openai/gpt-oss-20b",
+                    "pricing": {"prompt": "0", "completion": "0"},
+                    "context_length": 8192,
+                }
+            ]
+        }
         out = _parse_openrouter(data)
         assert len(out) == 1
         assert out[0]["is_free"] is True

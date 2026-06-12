@@ -1,8 +1,9 @@
 """Tests for the Heuristic Task Analyzer."""
+
 import pytest
 
-from core.task_analyzer import HeuristicTaskAnalyzer
 from core.schemas import TaskAnalysis
+from core.task_analyzer import HeuristicTaskAnalyzer
 
 
 @pytest.fixture

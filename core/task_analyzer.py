@@ -12,6 +12,7 @@ Usage:
   # -> TaskAnalysis(required_tags=["coding_sota", "test_generation", "refactoring_god"],
   #                 task_type="code", needs_tools=False, ...)
 """
+
 from __future__ import annotations
 
 import logging
@@ -31,34 +32,34 @@ TAG_KEYWORDS: dict[str, list[str]] = {
     r"\b(debug|bug|fix|traceback|error in)\b": ["debugging_expert", "coding_sota"],
     r"\b(refactor|restructure|cleanup|simplify)\b": ["refactoring_god", "coding_sota"],
     r"\b(test|pytest|unittest|test suite|coverage)\b": ["test_generation", "coding_sota"],
-
     # Reasoning / agentic
     r"\b(reason|chain of thought|step by step|analyze deeply)\b": ["deep_reasoning", "long_chain_of_thought"],
-    r"\b(agent|tool.?call|function.?call|use api|orchestrate)\b": ["tool_master", "parallel_tool_use", "agentic_god"],
+    r"\b(agent|tool.?call|function.?call|use api|orchestrate)\b": [
+        "tool_master",
+        "parallel_tool_use",
+        "agentic_god",
+    ],
     r"\b(critique|review|self.?reflect|grade)\b": ["self_reflection", "critique_master"],
-
     # Math
     r"\b(math|mathematical|prove|proof|olympiad|integral|equation)\b": ["math_expert", "proof_capable"],
-
     # Long context
-    r"\b(long|extensive|200k|book|novel|entire document|whole codebase)\b": ["long_context_king", "long_coherence", "200k_plus"],
-
+    r"\b(long|extensive|200k|book|novel|entire document|whole codebase)\b": [
+        "long_context_king",
+        "long_coherence",
+        "200k_plus",
+    ],
     # Speed / volume
     r"\b(fast|quick|rapid|brief|draft)\b": ["ultra_fast", "high_throughput"],
     r"\b(many|massive|hundreds|bulk|thousands of)\b": ["high_volume", "cheap_parallel"],
-
     # Multimodal
     r"\b(image|photo|picture|screenshot|vision|visual)\b": ["vision_master", "image_analysis", "multimodal"],
     r"\b(video|clip|footage)\b": ["video_understanding", "multimodal"],
-
     # Language hints
     r"(?i)\b(chinese|mandarin|cantonese|中文)\b": ["chinese_strong", "bilingual_perfect"],
     r"(?i)\b(in english|respond in english|en inglés)\b": ["bilingual_perfect"],
-
     # Writing
     r"\b(write|essay|story|narrative|novel|blog post|article)\b": ["writing_master", "narrative_coherence"],
     r"\b(roleplay|character|dialogue|persona)\b": ["roleplay_god", "writing_master"],
-
     # Output format
     r"\b(json|structured|schema|valid output)\b": ["json_mode_perfect", "structured_output"],
     r"\b(summarize|summary|tldr|recap)\b": ["summarization_expert"],
@@ -122,7 +123,9 @@ class HeuristicTaskAnalyzer:
 
         # --- needs ---
         needs_tools = any(t in tags for t in ("tool_master", "parallel_tool_use", "agentic_god"))
-        needs_multimodal = any(t in tags for t in ("vision_master", "image_analysis", "video_understanding", "multimodal"))
+        needs_multimodal = any(
+            t in tags for t in ("vision_master", "image_analysis", "video_understanding", "multimodal")
+        )
         needs_long_context = any(t in tags for t in ("long_context_king", "long_coherence", "200k_plus"))
 
         # --- quality ---
@@ -148,8 +151,13 @@ class HeuristicTaskAnalyzer:
         ratio = WORD_TOKEN_RATIO.get(language, 1.4)
         est_in = max(50, int(words * ratio))
         # Output rough default: 3x input for reasoning/coding, 2x for writing, 1.5x for chat
-        mult = 3.0 if any(t in tags for t in ("deep_reasoning", "long_chain_of_thought", "coding_sota")) else \
-               2.0 if task_type in ("writing", "research") else 1.5
+        mult = (
+            3.0
+            if any(t in tags for t in ("deep_reasoning", "long_chain_of_thought", "coding_sota"))
+            else 2.0
+            if task_type in ("writing", "research")
+            else 1.5
+        )
         est_out = max(100, int(est_in * mult))
 
         # --- notes ---
@@ -184,8 +192,8 @@ class LLMTaskAnalyzer:
         self.prompt_path = prompt_path or self.PROMPT_PATH
 
     def analyze(self, message: str, history: list[dict] | None = None) -> TaskAnalysis:
-        from pathlib import Path
         import json
+        from pathlib import Path
 
         from litellm import completion
 

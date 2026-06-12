@@ -17,6 +17,7 @@ Run:
   python server/app.py        # port 8080 by default
   uvicorn server.app:app --host 127.0.0.1 --port 8080
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,37 +34,34 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from core.model_registry import ModelRegistry
-from core.quota_manager import QuotaManager
-from core.cost_tracker import CostTracker, compute_cost_usd
 from core.budget import BudgetMonitor
-from core.session import SessionManager
-from core.task_analyzer import HeuristicTaskAnalyzer
-from core.orchestrator import RuleBasedOrchestrator, LLMOrchestrator
+from core.cost_tracker import CostTracker, compute_cost_usd
 from core.moa_engine import MoAEngine
+from core.model_registry import ModelRegistry
+from core.orchestrator import LLMOrchestrator, RuleBasedOrchestrator
+from core.quota_manager import QuotaManager
 from core.router_engine import RouterEngine
 from core.security import (
     RateLimiter,
     RedisTokenBucket,
     TokenBucket,
-    get_master_key,
-    require_master_key,
-    with_retry,
 )
+from core.session import SessionManager
+from core.task_analyzer import HeuristicTaskAnalyzer
 
 # iter 15: extracted modules (god-object refactor)
 from server.dependencies import make_auth_and_rate_limit
 from server.lifecycle import is_quota_reset_disabled, make_quota_reset_loop
 from server.middlewares import make_security_headers_middleware
-from core.security import RateLimiter
 
 log = logging.getLogger(__name__)
 
 
 # --- OpenAI-compatible request/response schemas ---
+
 
 class ToolCallFunction(BaseModel):
     name: str
@@ -106,6 +104,7 @@ class ChatCompletionChoice(BaseModel):
 
 class ChatCompletionChoiceDelta(BaseModel):
     """For streaming: each chunk carries a delta, not a full message."""
+
     index: int
     delta: dict
     finish_reason: str | None = None
@@ -132,6 +131,7 @@ class ChatCompletionResponse(BaseModel):
 
 class ChatCompletionChunk(BaseModel):
     """SSE chunk for streaming responses. Matches OpenAI's delta format."""
+
     id: str
     object: str = "chat.completion.chunk"
     created: int
@@ -140,6 +140,7 @@ class ChatCompletionChunk(BaseModel):
 
 
 # --- App factory ---
+
 
 def build_app(
     registry=None,
@@ -170,7 +171,9 @@ def build_app(
     """
     _master_key = os.environ.get("ROUTER_MASTER_KEY", "").strip()
     _allow_insecure = os.environ.get("ROUTER_ALLOW_INSECURE_NO_AUTH", "").strip().lower() in {
-        "1", "true", "yes",
+        "1",
+        "true",
+        "yes",
     }
     if not _master_key and not _allow_insecure:
         raise RuntimeError(
@@ -188,6 +191,7 @@ def build_app(
     if registry is None:
         if use_layered:
             from core.layered_registry import LayeredRegistry
+
             registry = LayeredRegistry.from_defaults()
         else:
             registry = ModelRegistry()
@@ -243,8 +247,10 @@ def build_app(
         log.info("MOA engine enabled by default (set ROUTER_ORCHESTRATOR_MODE=rule to disable)")
 
     router_engine = RouterEngine(
-        registry, quota,
-        HeuristicTaskAnalyzer(), active_orchestrator,
+        registry,
+        quota,
+        HeuristicTaskAnalyzer(),
+        active_orchestrator,
         moa_engine=active_moa,
         live=live,
         health_probe=health_probe,  # iter 15
@@ -260,10 +266,13 @@ def build_app(
     if _redis_url:
         try:
             import redis as _redis  # type: ignore
+
             _redis_client = _redis.Redis.from_url(_redis_url, decode_responses=True)
             _redis_client.ping()
             rate_limiter: RateLimiter = RedisTokenBucket(
-                capacity=_burst, refill_rate=_refill, redis_client=_redis_client,
+                capacity=_burst,
+                refill_rate=_refill,
+                redis_client=_redis_client,
             )
             log.info("Rate limiter: Redis-backed (multi-worker safe)")
         except (ImportError, OSError, RuntimeError) as e:
@@ -332,8 +341,7 @@ def build_app(
 
     # --- endpoints ---
 
-    @app.post("/v1/chat/completions",
-              dependencies=[Depends(auth_and_rate_limit)])
+    @app.post("/v1/chat/completions", dependencies=[Depends(auth_and_rate_limit)])
     def chat_completions(req: ChatCompletionRequest, request: Request):
         if not req.messages:
             raise HTTPException(status_code=400, detail="messages must not be empty")
@@ -354,7 +362,8 @@ def build_app(
             for m in req.messages[:-1]:  # everything except the last (current) turn
                 sess.append(m.role, m.content or "")
 
-        from core.router_engine import RouterEngine, RouterCallResult
+        from core.router_engine import RouterCallResult
+
         def _do_call() -> RouterCallResult:
             # Treat "auto" (or empty/None) as "let the orchestrator decide".
             chosen_model = req.model if (req.model and req.model != "auto") else None
@@ -370,8 +379,10 @@ def build_app(
 
         # Phase 13: record cost
         cost_usd = compute_cost_usd(
-            registry, result.model_used or "",
-            result.input_tokens, result.output_tokens,
+            registry,
+            result.model_used or "",
+            result.input_tokens,
+            result.output_tokens,
         )
         if result.model_used:
             cost_tracker.record(result.model_used, cost_usd)
@@ -381,8 +392,7 @@ def build_app(
         # Phase 12: record this turn in the session
         if sess is not None:
             sess.append("user", msgs[-1].get("content") or "")
-            sess.append("assistant", result.content,
-                        model_used=result.model_used, tokens=result.total_tokens)
+            sess.append("assistant", result.content, model_used=result.model_used, tokens=result.total_tokens)
 
         # Metrics
         metrics["calls_per_model"][result.model_used or "(none)"] += 1
@@ -427,11 +437,13 @@ def build_app(
             id=f"chatcmpl-{int(time.time() * 1000)}",
             created=int(time.time()),
             model=result.model_used or "unknown",
-            choices=[ChatCompletionChoice(
-                index=0,
-                message=message,
-                finish_reason="tool_calls" if tool_calls else "stop",
-            )],
+            choices=[
+                ChatCompletionChoice(
+                    index=0,
+                    message=message,
+                    finish_reason="tool_calls" if tool_calls else "stop",
+                )
+            ],
             usage=ChatCompletionUsage(
                 prompt_tokens=result.input_tokens,
                 completion_tokens=result.output_tokens,
@@ -445,6 +457,7 @@ def build_app(
     def _stream_chat(req: ChatCompletionRequest):
         """SSE stream of ChatCompletionChunk deltas, OpenAI-compatible."""
         from fastapi.responses import StreamingResponse
+
         msgs = [m.model_dump(exclude_none=True) for m in req.messages]
         chosen_model = req.model if (req.model and req.model != "auto") else None
         chunk_id = f"chatcmpl-{int(time.time() * 1000)}"
@@ -463,26 +476,30 @@ def build_app(
                         id=chunk_id,
                         created=created_ts,
                         model=piece.get("model", "unknown"),
-                        choices=[ChatCompletionChoiceDelta(
-                            index=0,
-                            delta=piece.get("delta", {}),
-                            finish_reason=piece.get("finish_reason"),
-                        )],
+                        choices=[
+                            ChatCompletionChoiceDelta(
+                                index=0,
+                                delta=piece.get("delta", {}),
+                                finish_reason=piece.get("finish_reason"),
+                            )
+                        ],
                     )
                     yield f"data: {chunk.model_dump_json()}\n\n"
                 yield "data: [DONE]\n\n"
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 # Surface the error to the client as the final chunk.
                 err_chunk = {
                     "id": chunk_id,
                     "object": "chat.completion.chunk",
                     "created": created_ts,
                     "model": "unknown",
-                    "choices": [{
-                        "index": 0,
-                        "delta": {"role": "assistant", "content": f"\n\n[stream error: {exc}]"},
-                        "finish_reason": "stop",
-                    }],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": f"\n\n[stream error: {exc}]"},
+                            "finish_reason": "stop",
+                        }
+                    ],
                 }
                 yield f"data: {json.dumps(err_chunk)}\n\n"
                 yield "data: [DONE]\n\n"
@@ -530,17 +547,25 @@ def build_app(
             layer_info = registry.summary()
         else:
             count = registry.count()
-            layer_info = {"curated_count": count, "discovered_count": 0,
-                          "merged_count": count, "free_count": len(registry.free_first())}
+            layer_info = {
+                "curated_count": count,
+                "discovered_count": 0,
+                "merged_count": count,
+                "free_count": len(registry.free_first()),
+            }
         # iter 15: include per-model health probe state so operators can
         # see which free models are currently being skipped.
         from core.health_probe import HealthState
+
         probe = router_engine.health_probe
         health_states = probe.all_states()
         unhealthy = [
-            {"model_id": mid, "state": h.state.value,
-             "consecutive_failures": h.consecutive_failures,
-             "cooldown_until": h.cooldown_until}
+            {
+                "model_id": mid,
+                "state": h.state.value,
+                "consecutive_failures": h.consecutive_failures,
+                "cooldown_until": h.cooldown_until,
+            }
             for mid, h in health_states.items()
             if h.state in (HealthState.UNHEALTHY, HealthState.HALF_OPEN)
         ]
@@ -598,18 +623,12 @@ def build_app(
         """Prometheus text exposition format."""
         lines: list[str] = []
         for model_id, n in metrics["calls_per_model"].items():
-            lines.append(
-                f'router_calls_total{{model="{model_id}"}} {n}'
-            )
+            lines.append(f'router_calls_total{{model="{model_id}"}} {n}')
         for model_id, t in metrics["tokens_per_model"].items():
-            lines.append(
-                f'router_tokens_total{{model="{model_id}"}} {t}'
-            )
+            lines.append(f'router_tokens_total{{model="{model_id}"}} {t}')
         for model_id, e in metrics["errors_per_model"].items():
             if e:
-                lines.append(
-                    f'router_errors_total{{model="{model_id}"}} {e}'
-                )
+                lines.append(f'router_errors_total{{model="{model_id}"}} {e}')
         if metrics["latency_samples"]:
             samples = metrics["latency_samples"]
             avg = sum(samples) / len(samples)
@@ -638,6 +657,7 @@ def build_app(
 
 def main() -> int:
     import uvicorn
+
     port = int(os.environ.get("ROUTER_HTTP_PORT", "8080"))
     # iter 15: pass the factory to uvicorn rather than the (now removed)
     # module-level `app` symbol.

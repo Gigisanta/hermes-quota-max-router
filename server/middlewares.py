@@ -4,13 +4,13 @@ iter 15: extracted from server/app.py:build_app() (the "god-object"
 refactor). Each middleware is a small factory so that the app factory
 stays thin and the headers/policies are easy to test in isolation.
 """
+
 from __future__ import annotations
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from starlette.types import ASGIApp
-
 
 # Headers applied to EVERY response. Order is irrelevant — `setdefault`
 # means an endpoint can override (useful for file downloads that need

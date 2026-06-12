@@ -4,14 +4,15 @@ Loads, queries, and persists model metadata. SQLite is the source of truth
 for the MVP; the JSON seed in `registry/models.json` is loaded on first init
 and treated as a snapshot.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import sqlite3
-from dataclasses import dataclass, asdict
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SEED_PATH = REPO_ROOT / "registry" / "models.json"
@@ -55,7 +56,7 @@ class Model:
     last_benchmark_date: str | None = None
 
     @classmethod
-    def from_json(cls, d: dict) -> "Model":
+    def from_json(cls, d: dict) -> Model:
         return cls(
             model_id=d["model_id"],
             provider=d["provider"],
@@ -156,15 +157,24 @@ class ModelRegistry:
                     last_benchmark_date=excluded.last_benchmark_date
                 """,
                 (
-                    model.model_id, model.provider, model.display_name,
-                    model.context_window, model.input_price, model.output_price,
-                    1 if model.is_free else 0, model.tier_rank,
+                    model.model_id,
+                    model.provider,
+                    model.display_name,
+                    model.context_window,
+                    model.input_price,
+                    model.output_price,
+                    1 if model.is_free else 0,
+                    model.tier_rank,
                     json.dumps(model.strength_tags),
                     json.dumps(model.weakness_tags),
                     json.dumps(model.best_for),
-                    model.performance_score, model.notes,
-                    model.daily_quota_tokens, model.current_remaining_tokens,
-                    model.last_reset, model.reset_schedule, model.last_benchmark_date,
+                    model.performance_score,
+                    model.notes,
+                    model.daily_quota_tokens,
+                    model.current_remaining_tokens,
+                    model.last_reset,
+                    model.reset_schedule,
+                    model.last_benchmark_date,
                 ),
             )
             conn.commit()
@@ -193,9 +203,7 @@ class ModelRegistry:
         if field not in safe:
             raise ValueError(f"count_by_field: field {field!r} not allowed")
         with self._connect() as conn:
-            return int(conn.execute(
-                f"SELECT COUNT(*) FROM models WHERE {field} = ?", (value,)
-            ).fetchone()[0])
+            return int(conn.execute(f"SELECT COUNT(*) FROM models WHERE {field} = ?", (value,)).fetchone()[0])
 
     def all(self) -> list[Model]:
         with self._connect() as conn:
@@ -212,15 +220,23 @@ class ModelRegistry:
     @staticmethod
     def _row_to_model(row: tuple) -> Model:
         return Model(
-            model_id=row[0], provider=row[1], display_name=row[2],
-            context_window=row[3], input_price=row[4], output_price=row[5],
-            is_free=bool(row[6]), tier_rank=row[7],
+            model_id=row[0],
+            provider=row[1],
+            display_name=row[2],
+            context_window=row[3],
+            input_price=row[4],
+            output_price=row[5],
+            is_free=bool(row[6]),
+            tier_rank=row[7],
             strength_tags=json.loads(row[8]),
             weakness_tags=json.loads(row[9]),
             best_for=json.loads(row[10]),
-            performance_score=row[11], notes=row[12],
-            daily_quota_tokens=row[13], current_remaining_tokens=row[14],
-            last_reset=row[15], reset_schedule=row[16],
+            performance_score=row[11],
+            notes=row[12],
+            daily_quota_tokens=row[13],
+            current_remaining_tokens=row[14],
+            last_reset=row[15],
+            reset_schedule=row[16],
             last_benchmark_date=row[17],
         )
 

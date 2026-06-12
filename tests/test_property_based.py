@@ -14,29 +14,29 @@ the router:
      single call (no negative balances, no over-burst)
   4. TaskAnalyzer never raises on arbitrary text input
 """
+
 from __future__ import annotations
 
+import io
 import json
 import logging
 import string
 from collections.abc import Iterator
 
-import hypothesis
 import pytest
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from core.health_probe import HealthProbe, HealthState
 from core.security import TokenBucket
 from core.task_analyzer import HeuristicTaskAnalyzer
 from server.logging_config import JsonFormatter
 
-
 # --- Helpers ---
 
 
 @pytest.fixture
-def captured_log() -> Iterator[io.StringIO]:  # type: ignore[name-defined]
-    import io
+def captured_log() -> Iterator[io.StringIO]:
     buf = io.StringIO()
     handler = logging.StreamHandler(stream=buf)
     handler.setFormatter(JsonFormatter())
@@ -69,7 +69,8 @@ def captured_log() -> Iterator[io.StringIO]:  # type: ignore[name-defined]
     ),
 )
 @settings(
-    max_examples=50, deadline=None,
+    max_examples=50,
+    deadline=None,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
 )
 def test_json_formatter_always_emits_valid_json(
@@ -107,7 +108,8 @@ def test_json_formatter_always_emits_valid_json(
 )
 @settings(max_examples=30, deadline=None)
 def test_health_probe_cooldown_count_monotonic(
-    n_successes: int, n_failures: int,
+    n_successes: int,
+    n_failures: int,
 ) -> None:
     """``cooldown_count`` never decreases regardless of the sequence of
     successes/failures. Each UNHEALTHY trip is permanent for the
@@ -153,7 +155,9 @@ def test_health_probe_unknown_model_is_always_available(name: str) -> None:
 )
 @settings(max_examples=30, deadline=None)
 def test_tokenbucket_never_overshoots(
-    capacity: float, refill: float, n_calls: int,
+    capacity: float,
+    refill: float,
+    n_calls: int,
 ) -> None:
     """Over a sequence of immediate calls, the bucket must not return
     True more than `ceil(capacity)` times before any time has passed."""

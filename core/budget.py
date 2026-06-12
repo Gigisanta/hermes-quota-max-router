@@ -10,11 +10,11 @@ The orchestrator is not hard-wired here — this is a passive monitor
 that exposes `should_warn` / `should_block` and an event log. The
 dashboard reads it for the burn-rate widget.
 """
+
 from __future__ import annotations
 
 import logging
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 
 log = logging.getLogger(__name__)
@@ -85,8 +85,10 @@ class BudgetMonitor:
                 out[s.model_id] = {
                     "pct_consumed": round(pct_consumed, 4),
                     "status": (
-                        "block" if pct_consumed >= self.block_pct
-                        else "warn" if pct_consumed >= self.warn_pct
+                        "block"
+                        if pct_consumed >= self.block_pct
+                        else "warn"
+                        if pct_consumed >= self.warn_pct
                         else "ok"
                     ),
                     "remaining": s.remaining,

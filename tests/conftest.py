@@ -17,13 +17,10 @@ The `QUOTA_DB_PATH` env var below lets us point the SQLite registries at a
 tmp_path unique to this test session so the discovered.json + curated.json we
 ship in `registry/` aren't mutated during the test run.
 """
+
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
-
 
 # Vars that must be unset for tests that expect a "clean" environment.
 # Tests that NEED a master key set one explicitly via monkeypatch.setenv.

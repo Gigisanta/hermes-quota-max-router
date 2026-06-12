@@ -15,6 +15,7 @@ The dependency is built via ``make_auth_and_rate_limit`` so that the
 caller can inject the master key + rate limiter + metrics dict (all
 of which are normally captured at app-build time).
 """
+
 from __future__ import annotations
 
 import hmac
@@ -52,9 +53,7 @@ def make_auth_and_rate_limit(
         if master_key:
             auth = request.headers.get("authorization")
             if not auth or not auth.startswith("Bearer "):
-                raise HTTPException(
-                    status_code=401, detail="Missing or invalid Authorization header"
-                )
+                raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
             provided = auth.removeprefix("Bearer ").strip()
             if not hmac.compare_digest(provided.encode("utf-8"), master_key.encode("utf-8")):
                 raise HTTPException(status_code=401, detail="Invalid API key")

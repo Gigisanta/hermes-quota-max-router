@@ -15,12 +15,12 @@ This module is the actual "discovery" the spec asks for. With the
 Network failures degrade gracefully: if OpenRouter is down, we still
 get HF + curated. If both network sources fail, we still have curated.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 from pathlib import Path
-from typing import Any
 
 import httpx
 
@@ -78,9 +78,7 @@ class RemoteFeedProvider:
                 errors.append(msg)
                 log.warning("catalog %s failed: %s", cat.name, e)
         if not out and errors:
-            raise RuntimeError(
-                f"All catalogs failed: {'; '.join(errors)}"
-            )
+            raise RuntimeError(f"All catalogs failed: {'; '.join(errors)}")
         return out
 
     def _fetch_one(self, cat: CatalogEntry) -> list[dict]:
@@ -93,7 +91,8 @@ class RemoteFeedProvider:
         path = self.curated_path
         if path is None:
             # Default to the in-repo seed
-            from .catalogs import CATALOGS as _c  # noqa: F401
+            from .catalogs import CATALOGS as _CATALOGS  # noqa: F401
+
             # Walk up to find registry/models.json
             here = Path(__file__).resolve().parent.parent
             path = here / "registry" / "models.json"

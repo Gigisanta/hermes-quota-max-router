@@ -4,18 +4,19 @@ The engine is tested in `live=False` mode so no network is hit. The
 only `litellm` interaction is verified by patching it and asserting
 that the right model is called.
 """
+
 import json
 from pathlib import Path
 
-import pytest
 import fakeredis
+import pytest
 
-from core.model_registry import ModelRegistry
-from core.quota_manager import QuotaManager
-from core.task_analyzer import HeuristicTaskAnalyzer
-from core.orchestrator import RuleBasedOrchestrator
 from core.moa_engine import MoAEngine
-from core.router_engine import RouterEngine, RouterCallResult, _stub_response
+from core.model_registry import ModelRegistry
+from core.orchestrator import RuleBasedOrchestrator
+from core.quota_manager import QuotaManager
+from core.router_engine import RouterCallResult, RouterEngine, _stub_response
+from core.task_analyzer import HeuristicTaskAnalyzer
 
 
 @pytest.fixture
@@ -27,21 +28,32 @@ def state(tmp_path: Path) -> dict:
     and can drain it predictably.
     """
     import json
+
     seed = tmp_path / "s.json"
-    seed.write_text(json.dumps({
-        "models": [{
-            "model_id": "fake/deepseek", "provider": "fake", "display_name": "Fake DS",
-            "context_window": 1000,
-            "input_price": 0.0, "output_price": 0.0,
-            "is_free": True, "tier_rank": 1,
-            "strength_tags": ["coding_sota", "deep_reasoning"],
-            "weakness_tags": [],
-            "best_for": ["coding"],
-            "performance_score": 90.0,
-            "daily_quota_tokens": 100_000,
-            "current_remaining_tokens": 100_000,
-        }],
-    }))
+    seed.write_text(
+        json.dumps(
+            {
+                "models": [
+                    {
+                        "model_id": "fake/deepseek",
+                        "provider": "fake",
+                        "display_name": "Fake DS",
+                        "context_window": 1000,
+                        "input_price": 0.0,
+                        "output_price": 0.0,
+                        "is_free": True,
+                        "tier_rank": 1,
+                        "strength_tags": ["coding_sota", "deep_reasoning"],
+                        "weakness_tags": [],
+                        "best_for": ["coding"],
+                        "performance_score": 90.0,
+                        "daily_quota_tokens": 100_000,
+                        "current_remaining_tokens": 100_000,
+                    }
+                ],
+            }
+        )
+    )
     reg = ModelRegistry(db_path=tmp_path / "r.sqlite", seed_path=seed)
     qm = QuotaManager(store=fakeredis.FakeRedis(decode_responses=True))
     qm.sync_from_registry(reg)
@@ -67,6 +79,7 @@ def engine(state: dict, tmp_path: Path) -> RouterEngine:
 
 # --- _stub_response ---
 
+
 def test_stub_response_shape() -> None:
     r = _stub_response("fake/m", [{"role": "user", "content": "hi there"}])
     assert "choices" in r
@@ -81,6 +94,7 @@ def test_stub_response_empty_user_message() -> None:
 
 # --- explicit model path ---
 
+
 def test_explicit_model_skips_orchestration(engine: RouterEngine) -> None:
     r = engine.completion(
         messages=[{"role": "user", "content": "hello"}],
@@ -93,9 +107,8 @@ def test_explicit_model_skips_orchestration(engine: RouterEngine) -> None:
 
 # --- orchestrated path ---
 
-def test_orchestrated_path_picks_free_model(
-    engine: RouterEngine, state: dict
-) -> None:
+
+def test_orchestrated_path_picks_free_model(engine: RouterEngine, state: dict) -> None:
     r = engine.completion(
         messages=[{"role": "user", "content": "Refactor this Python function and add tests"}],
     )
@@ -106,9 +119,7 @@ def test_orchestrated_path_picks_free_model(
     assert r.error is None
 
 
-def test_quota_is_consumed_on_success(
-    engine: RouterEngine, state: dict
-) -> None:
+def test_quota_is_consumed_on_success(engine: RouterEngine, state: dict) -> None:
     before = state["quota"].remaining("fake/deepseek")
     assert before is not None
     engine.completion(
@@ -119,9 +130,7 @@ def test_quota_is_consumed_on_success(
     assert after < before
 
 
-def test_quota_not_consumed_on_quota_block(
-    engine: RouterEngine, state: dict
-) -> None:
+def test_quota_not_consumed_on_quota_block(engine: RouterEngine, state: dict) -> None:
     # Drain the quota entirely
     state["quota"].consume("fake/deepseek", 100_000)
     snap_before = state["quota"].snapshot("fake/deepseek")
@@ -150,11 +159,12 @@ def test_logging_writes_jsonl(engine: RouterEngine, tmp_path: Path) -> None:
 
 # --- MoA path ---
 
+
 def test_moa_path_uses_engine_when_decision_is_moa(
     state: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Force the orchestrator to choose moa, then verify MoAEngine is invoked."""
-    from core.schemas import TaskAnalysis, RoutingDecision
+    from core.schemas import RoutingDecision
 
     # Bypass orchestrator: build a router that always returns moa
     class _MoAOrchestrator:
@@ -176,21 +186,26 @@ def test_moa_path_uses_engine_when_decision_is_moa(
     async def fake_acomp(model: str, *args, **kwargs):
         class _R(dict):
             pass
-        r = _R(choices=[{"message": {"content": f"resp from {model}"}}],
-               usage={"total_tokens": 50})
+
+        r = _R(choices=[{"message": {"content": f"resp from {model}"}}], usage={"total_tokens": 50})
         return r
+
     monkeypatch.setattr("litellm.acompletion", fake_acomp)
 
     # Pre-seed synth quota
-    state["quota"]._write_full("gemini/gemini-2.5-flash", total=500_000,
-                                last_reset=None, reset_schedule="")
+    state["quota"]._write_full("gemini/gemini-2.5-flash", total=500_000, last_reset=None, reset_schedule="")
 
-    moa = MoAEngine(state["registry"], state["quota"],
-                    synthesizer_model="gemini/gemini-2.5-flash", timeout_s=2.0)
+    moa = MoAEngine(
+        state["registry"], state["quota"], synthesizer_model="gemini/gemini-2.5-flash", timeout_s=2.0
+    )
     engine = RouterEngine(
-        state["registry"], state["quota"],
-        state["analyzer"], _MoAOrchestrator(), moa_engine=moa,
-        live=False, log_path=tmp_path / "router.jsonl",
+        state["registry"],
+        state["quota"],
+        state["analyzer"],
+        _MoAOrchestrator(),
+        moa_engine=moa,
+        live=False,
+        log_path=tmp_path / "router.jsonl",
     )
     r = engine.completion(messages=[{"role": "user", "content": "research this deeply"}])
     assert r.decision.chosen_strategy == "moa"
@@ -201,9 +216,13 @@ def test_moa_path_uses_engine_when_decision_is_moa(
 
 def test_router_call_result_to_dict_has_required_fields() -> None:
     from core.schemas import RoutingDecision
+
     rc = RouterCallResult(
         decision=RoutingDecision(chosen_strategy="direct", primary_model="x/y", reasoning="r"),
-        model_used="x/y", content="hi", total_tokens=42, duration_s=0.1,
+        model_used="x/y",
+        content="hi",
+        total_tokens=42,
+        duration_s=0.1,
     )
     d = rc.to_dict()
     assert d["model_used"] == "x/y"

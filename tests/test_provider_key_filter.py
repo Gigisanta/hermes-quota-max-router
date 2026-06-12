@@ -1,10 +1,10 @@
 """
 Tests for has_key_for_model — the env-based provider availability filter.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-import pytest
 
 from core.orchestrator import has_key_for_model
 
@@ -12,6 +12,7 @@ from core.orchestrator import has_key_for_model
 @dataclass
 class FakeModel:
     """Minimal stand-in: only `provider` is consulted by the filter."""
+
     provider: str
     model_id: str = "x/y"
 

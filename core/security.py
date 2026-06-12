@@ -9,18 +9,21 @@ Pure functions / small classes that the FastAPI server wires in:
 Kept separate from the server so the server module stays thin and these
 utilities are independently testable.
 """
+
 from __future__ import annotations
 
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 T = TypeVar("T")
 
 
 # --- Auth ---
+
 
 def get_master_key() -> str:
     return os.environ.get("ROUTER_MASTER_KEY", "")
@@ -38,6 +41,7 @@ def require_master_key(authorization: str | None) -> None:
         return  # auth disabled
     if not authorization or not authorization.startswith("Bearer "):
         from fastapi import HTTPException, status
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or invalid Authorization header",
@@ -45,12 +49,15 @@ def require_master_key(authorization: str | None) -> None:
     provided = authorization.removeprefix("Bearer ").strip()
     if provided != expected:
         from fastapi import HTTPException, status
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key",
         )
 
+
 # --- Rate limiting ---
+
 
 @dataclass
 class TokenBucket:
@@ -114,6 +121,7 @@ class RateLimiter(Protocol):
     :class:`RedisTokenBucket` satisfy this protocol, so the
     dependency-injection in `build_app()` can swap them transparently.
     """
+
     def allow(self, key: str, cost: float = 1.0) -> bool: ...
     def reset(self, key: str | None = None) -> None: ...
 
@@ -125,7 +133,7 @@ class RedisTokenBucket:
     iter 15: the in-process :class:`TokenBucket` only works for
     single-worker uvicorn. With multiple workers (the production
     default `uvicorn --workers 4`), each worker has its own counter
-    → a 4-worker deployment would admit 4× the intended rate. The
+    → a 4-worker deployment would admit 4x the intended rate. The
     RedisTokenBucket fixes this by storing tokens + last in Redis.
 
     **Atomicity note.** We use HGETALL → compute → HMSET, which is
@@ -144,6 +152,7 @@ class RedisTokenBucket:
       - ``rl:{key}`` → hash with ``tokens`` (float) and ``last`` (float
         wall time seconds).
     """
+
     capacity: float
     refill_rate: float  # tokens per second
     redis_client: Any = None  # redis.Redis instance; injected
@@ -210,7 +219,8 @@ class RedisTokenBucket:
                 allowed = 1
             # Persist new state.
             self.redis_client.hmset(
-                full_key, {"tokens": tokens, "last": now},
+                full_key,
+                {"tokens": tokens, "last": now},
             )
             self.redis_client.expire(full_key, 3600)
             return allowed == 1
@@ -218,8 +228,10 @@ class RedisTokenBucket:
             # Redis unavailable or broken client. Fail OPEN (admit the
             # request) so a Redis outage doesn't take down the API.
             import logging as _log
+
             _log.getLogger(__name__).warning(
-                "RedisTokenBucket: Redis unavailable (%s); failing open.", e,
+                "RedisTokenBucket: Redis unavailable (%s); failing open.",
+                e,
             )
             return True
 
@@ -247,7 +259,8 @@ class RedisTokenBucket:
 # (with safe fallbacks for tests / minimal installs).
 
 try:
-    import litellm.exceptions as _litellm_exceptions  # noqa: F401
+    import litellm.exceptions as _litellm_exceptions
+
     _RETRYABLE_EXC_TYPES: tuple[type, ...] = (
         _litellm_exceptions.APIConnectionError,
         _litellm_exceptions.Timeout,
@@ -293,19 +306,36 @@ def is_transient_error(exc: Exception) -> bool:
     return any(
         kw in msg
         for kw in (
-            "rate limit", "rate-limit", "ratelimit",
-            " 429", "429 ", "http 429",
-            " 500", "500 ", "http 500",
-            " 502", "502 ", "http 502",
-            " 503", "503 ", "http 503",
-            " 504", "504 ", "http 504",
-            "service unavailable", "temporarily unavailable",
-            "timeout", "timed out", "connection reset", "connection aborted",
+            "rate limit",
+            "rate-limit",
+            "ratelimit",
+            " 429",
+            "429 ",
+            "http 429",
+            " 500",
+            "500 ",
+            "http 500",
+            " 502",
+            "502 ",
+            "http 502",
+            " 503",
+            "503 ",
+            "http 503",
+            " 504",
+            "504 ",
+            "http 504",
+            "service unavailable",
+            "temporarily unavailable",
+            "timeout",
+            "timed out",
+            "connection reset",
+            "connection aborted",
         )
     )
 
 
 # --- Retry with exponential backoff ---
+
 
 def with_retry(
     fn: Callable[[], T],
@@ -323,7 +353,7 @@ def with_retry(
     for attempt in range(1, max_attempts + 1):
         try:
             return fn()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             if not is_transient_error(e) or attempt == max_attempts:
                 raise
             last_exc = e

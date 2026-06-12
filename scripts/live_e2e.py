@@ -8,6 +8,7 @@ Run via:
 Tests 3 free tiers end-to-end with the actual API. Measures latency,
 token consumption, and response quality.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,10 +46,12 @@ def main() -> int:
     if args.gemini:
         cases.append(("gemini/gemini-2.5-flash", "Reply with the single word PONG."))
     if args.openrouter:
-        cases.append((
-            "openrouter/meta-llama/llama-3.3-70b-instruct:free",
-            "Reply with the single word PONG.",
-        ))
+        cases.append(
+            (
+                "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+                "Reply with the single word PONG.",
+            )
+        )
     if args.deepseek:
         cases.append(("deepseek/deepseek-chat", "Reply with the single word PONG."))
 
@@ -67,12 +70,18 @@ def main() -> int:
             content = (r.choices[0].message.content or "").strip()
             u = r.usage
             cost = float(r._hidden_params.get("response_cost", 0) or 0)
-            results.append({
-                "model": model, "ok": True, "latency_s": round(dt, 3),
-                "in": u.prompt_tokens, "out": u.completion_tokens,
-                "total": u.total_tokens, "cost": cost,
-                "content": content,
-            })
+            results.append(
+                {
+                    "model": model,
+                    "ok": True,
+                    "latency_s": round(dt, 3),
+                    "in": u.prompt_tokens,
+                    "out": u.completion_tokens,
+                    "total": u.total_tokens,
+                    "cost": cost,
+                    "content": content,
+                }
+            )
             print(f"  ok: {dt:.2f}s | tokens: {u.total_tokens} | cost: ${cost:.6f}")
             print(f"  content: {content[:80]!r}")
         except Exception as e:

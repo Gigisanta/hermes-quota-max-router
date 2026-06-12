@@ -16,15 +16,15 @@ This way:
   - A `remove_missing` from the discovered layer is safe (doesn't touch
     curated)
 """
+
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .model_registry import Model, ModelRegistry
-
-import os
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CURATED_PATH = REPO_ROOT / "registry" / "models.json"
@@ -49,6 +49,7 @@ def _db_dir() -> Path:
 @dataclass
 class LayeredRegistry:
     """Merges curated + discovered models. Curated takes priority on conflict."""
+
     curated: ModelRegistry
     discovered: ModelRegistry
 
@@ -57,7 +58,7 @@ class LayeredRegistry:
         cls,
         curated_path: Path | None = None,
         discovered_path: Path | None = None,
-    ) -> "LayeredRegistry":
+    ) -> LayeredRegistry:
         cp = curated_path or CURATED_PATH
         dp = discovered_path or DISCOVERED_PATH
         db_dir = _db_dir()

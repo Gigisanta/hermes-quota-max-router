@@ -13,9 +13,9 @@ Run:
   source ~/.hermes/hermes-agent/venv/bin/activate
   python scripts/e2e_hermes_provider.py
 """
+
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
@@ -30,10 +30,12 @@ sys.path.insert(0, str(REPO_ROOT))
 def main() -> int:
     # Force discovery of the QuotaMax Router plugin profile.
     import providers
+
     providers._discovered = False
     providers._REGISTRY.clear()
 
     from providers import get_provider_profile
+
     profile = get_provider_profile("quotamax-router")
     if profile is None:
         print("FAIL: quotamax-router profile not discovered", file=sys.stderr)
@@ -72,7 +74,7 @@ def main() -> int:
             )
             r.raise_for_status()
             body = r.json()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"FAIL: HTTP call raised: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
     dt = time.monotonic() - t0
@@ -88,7 +90,9 @@ def main() -> int:
     print(f"  HTTP elapsed    : {dt:.2f}s")
     print(f"  model used      : {used_model}")
     print(f"  content         : {content!r}")
-    print(f"  tokens          : prompt={u.get('prompt_tokens')} completion={u.get('completion_tokens')} total={u.get('total_tokens')}")
+    print(
+        f"  tokens          : prompt={u.get('prompt_tokens')} completion={u.get('completion_tokens')} total={u.get('total_tokens')}"
+    )
     print(f"  cost USD        : ${cost:.6f}")
     print(f"  is real (PONG)  : {content.upper() == 'PONG'}")
     print(f"  is free         : {cost == 0.0}")

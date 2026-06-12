@@ -16,11 +16,11 @@ Usage:
   # -> RoutingDecision(chosen_strategy="direct", primary_model="deepseek/...",
   #                    confidence=0.82, reasoning="...", ...)
 """
+
 from __future__ import annotations
 
 import json
 import logging
-import math
 from pathlib import Path
 from typing import Protocol
 
@@ -66,7 +66,7 @@ _PROVIDER_KEY_ENV: dict[str, tuple[str, ...]] = {
 }
 
 
-def has_key_for_model(model: "Model") -> bool:
+def has_key_for_model(model: Model) -> bool:
     """Return True if the provider backing this model has a key in env.
 
     Curated OpenRouter entries (e.g. ``openrouter/qwen/...``) require
@@ -76,6 +76,7 @@ def has_key_for_model(model: "Model") -> bool:
     auth (e.g. self-hosted, public).
     """
     import os as _os
+
     providers = _PROVIDER_KEY_ENV.get(model.provider, ())
     if not providers:
         return True  # unknown provider → assume no key required
@@ -217,12 +218,13 @@ class RuleBasedOrchestrator:
 
         scored_paid: list[tuple[float, Model]] = sorted(
             ((_score_candidate(m, analysis, quota_manager)[0], m) for m in paid),
-            key=lambda t: t[0], reverse=True,
+            key=lambda t: t[0],
+            reverse=True,
         )
 
         # --- Strategy selection ---
-        top_score, top_model = (scored_free[0] if scored_free else (0.0, None))
-        second_score, second_model = (scored_free[1] if len(scored_free) > 1 else (0.0, None))
+        top_score, top_model = scored_free[0] if scored_free else (0.0, None)
+        _second_score, second_model = scored_free[1] if len(scored_free) > 1 else (0.0, None)
 
         # MoA: if task is demanding (≥3 tags, very_high/exceptional) AND ≥3 free
         # models have non-zero match, fan out for synthesis.
@@ -267,9 +269,7 @@ class RuleBasedOrchestrator:
                 estimated_tokens=analysis.estimated_input_tokens + analysis.estimated_output_tokens,
                 quality_expectation=analysis.min_quality,  # type: ignore[arg-type]
                 preserve_paid_quota=True,
-                tags_matched=[
-                    t for t in analysis.required_tags if t in top_model.strength_tags
-                ],
+                tags_matched=[t for t in analysis.required_tags if t in top_model.strength_tags],
                 confidence=round(min(0.95, top_score), 2),
             )
 
@@ -311,16 +311,16 @@ class RuleBasedOrchestrator:
                 reasoning=(
                     f"Weak confidence in free-tier match ({top_score:.2f}). "
                     f"Using best available: {top_model.model_id}."
-                ) + (
+                )
+                + (
                     f" Quota vetoed: {', '.join(m.model_id for m in blocked_free[:3])}."
-                    if blocked_free else ""
+                    if blocked_free
+                    else ""
                 ),
                 estimated_tokens=analysis.estimated_input_tokens + analysis.estimated_output_tokens,
                 quality_expectation="high",
                 preserve_paid_quota=True,
-                tags_matched=[
-                    t for t in analysis.required_tags if t in top_model.strength_tags
-                ],
+                tags_matched=[t for t in analysis.required_tags if t in top_model.strength_tags],
                 confidence=round(max(CONFIDENCE_FALLBACK, top_score), 2),
             )
 
@@ -358,8 +358,10 @@ class LLMOrchestrator:
             # without calling any LLM. Used in tests and when the brain
             # model key is missing.
             free = [m for m in registry.all() if m.is_free]
-            top = sorted(free, key=lambda m: m.tier_rank)[0] if free else (
-                registry.all()[0] if registry.all() else None
+            top = (
+                sorted(free, key=lambda m: m.tier_rank)[0]
+                if free
+                else (registry.all()[0] if registry.all() else None)
             )
             if top is None:
                 return RoutingDecision(
@@ -374,7 +376,7 @@ class LLMOrchestrator:
                 fallback_model=None,
                 models_to_use=[top.model_id],
                 reasoning=f"[LLMOrchestrator stub] picked top free model {top.model_id} "
-                          f"(brain model {self.model} not live).",
+                f"(brain model {self.model} not live).",
                 estimated_tokens=analysis.estimated_input_tokens + analysis.estimated_output_tokens,
                 quality_expectation=analysis.min_quality,
                 preserve_paid_quota=True,
@@ -412,20 +414,26 @@ class LLMOrchestrator:
             snap = quota_manager.snapshot(m.model_id)
             quota_str = (
                 f"{snap.remaining:,}/{snap.total:,} ({snap.pct_remaining:.0%})"
-                if snap.has_quota() else "unlimited (paid)"
+                if snap.has_quota()
+                else "unlimited (paid)"
             )
-            rows.append({
-                "model_id": m.model_id,
-                "free": m.is_free,
-                "tier_rank": m.tier_rank,
-                "performance": m.performance_score,
-                "quota": quota_str,
-                "strengths": m.strength_tags,
-            })
-        return json.dumps({
-            "task_analysis": analysis.model_dump(),
-            "available_models": rows,
-        }, indent=2)
+            rows.append(
+                {
+                    "model_id": m.model_id,
+                    "free": m.is_free,
+                    "tier_rank": m.tier_rank,
+                    "performance": m.performance_score,
+                    "quota": quota_str,
+                    "strengths": m.strength_tags,
+                }
+            )
+        return json.dumps(
+            {
+                "task_analysis": analysis.model_dump(),
+                "available_models": rows,
+            },
+            indent=2,
+        )
 
 
 if __name__ == "__main__":

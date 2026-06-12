@@ -1,5 +1,5 @@
 """Tests for the catalog parsers and remote feeds (Phase 16)."""
-import json
+
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -14,8 +14,8 @@ from core.catalogs import (
 )
 from core.remote_feeds import RemoteFeedProvider
 
-
 # --- OpenRouter parser ---
+
 
 def test_openrouter_parses_free_and_paid() -> None:
     raw = {
@@ -65,6 +65,7 @@ def test_openrouter_skips_models_without_id() -> None:
 
 # --- HuggingFace parser ---
 
+
 def test_huggingface_parses_chat_model() -> None:
     raw = [
         {
@@ -96,12 +97,14 @@ def test_huggingface_handles_dict_response() -> None:
 
 # --- Static curated ---
 
+
 def test_static_curated_returns_models_list() -> None:
     raw = {"models": [{"model_id": "a/b"}]}
     assert _parse_static_curated(raw) == [{"model_id": "a/b"}]
 
 
 # --- RemoteFeedProvider integration ---
+
 
 def test_remote_provider_aggregates_multiple_sources() -> None:
     """With all sources failing except curated, the curated list wins."""
@@ -150,16 +153,37 @@ def test_remote_provider_dedupes_by_model_id() -> None:
         mock_instance.__enter__.return_value = mock_instance
         # Both openrouter and HF return entries with the same id
         mock_instance.get.return_value = MagicMock(
-            json=lambda: {"data": [{"id": "x/y", "name": "Y", "pricing": {"prompt": "0", "completion": "0"}, "architecture": {"context_length": 1000}, "top_provider": {}, "description": "x"}]}
+            json=lambda: {
+                "data": [
+                    {
+                        "id": "x/y",
+                        "name": "Y",
+                        "pricing": {"prompt": "0", "completion": "0"},
+                        "architecture": {"context_length": 1000},
+                        "top_provider": {},
+                        "description": "x",
+                    }
+                ]
+            }
         )
         MockClient.return_value = mock_instance
 
         with patch("core.remote_feeds.RemoteFeedProvider._load_curated") as mock_curated:
             mock_curated.return_value = [
-                {"model_id": "x/y", "provider": "x", "display_name": "Y",
-                 "context_window": 1000, "input_price": 0.0, "output_price": 0.0,
-                 "is_free": True, "tier_rank": 1, "strength_tags": [],
-                 "weakness_tags": [], "best_for": [], "performance_score": 50.0},
+                {
+                    "model_id": "x/y",
+                    "provider": "x",
+                    "display_name": "Y",
+                    "context_window": 1000,
+                    "input_price": 0.0,
+                    "output_price": 0.0,
+                    "is_free": True,
+                    "tier_rank": 1,
+                    "strength_tags": [],
+                    "weakness_tags": [],
+                    "best_for": [],
+                    "performance_score": 50.0,
+                },
             ]
             provider = RemoteFeedProvider(timeout_s=1.0)
             out = provider.fetch_all()
@@ -169,6 +193,7 @@ def test_remote_provider_dedupes_by_model_id() -> None:
 
 
 # --- Catalog list integrity ---
+
 
 def test_catalogs_list_has_expected_entries() -> None:
     names = [c.name for c in CATALOGS]

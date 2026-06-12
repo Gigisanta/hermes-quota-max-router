@@ -1,4 +1,5 @@
 """Tests for the HealthProbe circuit breaker (iter 15)."""
+
 from __future__ import annotations
 
 import time
@@ -8,7 +9,6 @@ import pytest
 from core.health_probe import (
     HealthProbe,
     HealthState,
-    ModelHealth,
     get_default_probe,
     set_default_probe,
 )
@@ -124,10 +124,12 @@ def test_thread_safety(probe: HealthProbe) -> None:
     """Smoke test: many threads hammering record_success/failure
     should not crash or deadlock."""
     import threading
+
     def worker() -> None:
         for _ in range(100):
             probe.record_success("m1")
             probe.record_failure("m1", transient=True, error="x")
+
     threads = [threading.Thread(target=worker) for _ in range(8)]
     for t in threads:
         t.start()
@@ -136,8 +138,10 @@ def test_thread_safety(probe: HealthProbe) -> None:
     # State should be consistent (no exception, state is one of valid)
     h = probe.get_state("m1")
     assert h.state in (
-        HealthState.HEALTHY, HealthState.DEGRADED,
-        HealthState.UNHEALTHY, HealthState.HALF_OPEN,
+        HealthState.HEALTHY,
+        HealthState.DEGRADED,
+        HealthState.UNHEALTHY,
+        HealthState.HALF_OPEN,
     )
     assert h.total_calls == 1600  # 8 threads * 200 calls
 

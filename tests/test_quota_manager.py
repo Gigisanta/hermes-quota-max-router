@@ -1,6 +1,7 @@
 """Tests for QuotaManager (Phase 2). Uses fakeredis explicitly for isolation."""
-import pytest
+
 import fakeredis
+import pytest
 
 from core.model_registry import ModelRegistry
 from core.quota_manager import QuotaManager, QuotaSnapshot
@@ -24,18 +25,32 @@ def seeded_qm(qm: QuotaManager, tmp_registry) -> QuotaManager:
 
 def test_sync_from_registry_loads_seeded_models(qm: QuotaManager, tmp_path) -> None:
     import json
-    from core.model_registry import ModelRegistry, Model
+
     seed = tmp_path / "seed.json"
-    seed.write_text(json.dumps({
-        "models": [{
-            "model_id": "x/free", "provider": "x", "display_name": "X Free",
-            "context_window": 1000, "input_price": 0.0, "output_price": 0.0,
-            "is_free": True, "tier_rank": 1,
-            "strength_tags": ["deep_reasoning"], "weakness_tags": [],
-            "best_for": ["coding"], "performance_score": 90.0,
-            "daily_quota_tokens": 1000, "current_remaining_tokens": 1000,
-        }]
-    }))
+    seed.write_text(
+        json.dumps(
+            {
+                "models": [
+                    {
+                        "model_id": "x/free",
+                        "provider": "x",
+                        "display_name": "X Free",
+                        "context_window": 1000,
+                        "input_price": 0.0,
+                        "output_price": 0.0,
+                        "is_free": True,
+                        "tier_rank": 1,
+                        "strength_tags": ["deep_reasoning"],
+                        "weakness_tags": [],
+                        "best_for": ["coding"],
+                        "performance_score": 90.0,
+                        "daily_quota_tokens": 1000,
+                        "current_remaining_tokens": 1000,
+                    }
+                ]
+            }
+        )
+    )
     reg = ModelRegistry(db_path=tmp_path / "r.sqlite", seed_path=seed)
     n = qm.sync_from_registry(reg)
     assert n == 1

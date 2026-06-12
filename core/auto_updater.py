@@ -18,14 +18,16 @@ Usage:
   result = updater.apply_feed(feed_models)
   print(result.changes)  # ['updated: deepseek/...', 'added: openrouter/...']
 """
+
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Protocol
 
 from .model_registry import Model, ModelRegistry
 
@@ -38,6 +40,7 @@ class FeedProvider(Protocol):
 
 class LocalFeedProvider:
     """Reads a feed from a local JSON file. Schema matches models.json."""
+
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
 
@@ -52,6 +55,7 @@ class LocalFeedProvider:
 
 class StaticFeedProvider:
     """Returns a fixed in-memory list. Useful for tests."""
+
     def __init__(self, models: list[dict]) -> None:
         self._models = models
 
@@ -90,7 +94,7 @@ def _bump_version(old: str) -> str:
     The seed uses calendar versions; if the incoming feed's version
     is older, we still bump to "now" so the changelog is monotonic.
     """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     if not old:
         return today
     # If old is already today's date, append a sub-revision counter
@@ -126,14 +130,14 @@ class RegistryUpdater:
         self.remove_missing = remove_missing
 
     def apply_feed(self, feed: Iterable[dict]) -> UpdateResult:
-        result = UpdateResult(timestamp=datetime.now(timezone.utc).isoformat())
+        result = UpdateResult(timestamp=datetime.now(UTC).isoformat())
         existing = {m.model_id: m for m in self.registry.all()}
         feed_ids: set[str] = set()
 
         for raw in feed:
             try:
                 incoming = Model.from_json(raw)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 # Common causes: missing field, wrong type
                 mid = raw.get("model_id", "<unknown>")
                 result.errors.append(f"{mid}: {e}")
@@ -186,11 +190,22 @@ def _models_differ(a: Model, b: Model) -> bool:
     """Field-level diff. We ignore quota counters (current_remaining_tokens)
     because those are live and managed by the QuotaManager, not the seed."""
     live_fields = {
-        "model_id", "provider", "display_name", "context_window",
-        "input_price", "output_price", "is_free", "tier_rank",
-        "strength_tags", "weakness_tags", "best_for",
-        "performance_score", "notes", "daily_quota_tokens",
-        "reset_schedule", "last_benchmark_date",
+        "model_id",
+        "provider",
+        "display_name",
+        "context_window",
+        "input_price",
+        "output_price",
+        "is_free",
+        "tier_rank",
+        "strength_tags",
+        "weakness_tags",
+        "best_for",
+        "performance_score",
+        "notes",
+        "daily_quota_tokens",
+        "reset_schedule",
+        "last_benchmark_date",
     }
     for fname in live_fields:
         if getattr(a, fname) != getattr(b, fname):

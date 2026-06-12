@@ -2,18 +2,19 @@
 
 The async engine is tested with a fake acompletion so no network is hit.
 """
+
 import asyncio
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-import pytest
 import fakeredis
+import pytest
 
+from core.moa_engine import MoAEngine, ModelCall, _call_one
 from core.model_registry import ModelRegistry
 from core.quota_manager import QuotaManager
 from core.schemas import TaskAnalysis
-from core.moa_engine import MoAEngine, _call_one, ModelCall
 
 
 @dataclass
@@ -23,6 +24,7 @@ class _FakeResp(dict):
     The MoA engine does `resp["choices"]` AND `resp.get("usage", {})` in
     different places. Subclassing dict makes both work.
     """
+
     text: str = ""
     tokens: int = 0
 
@@ -67,6 +69,7 @@ def engine(qm: QuotaManager, registry: ModelRegistry) -> MoAEngine:
 def test_call_one_success(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_acompletion(*args: Any, **kwargs: Any):
         return _mk_resp("hello from fake", tokens=42)
+
     monkeypatch.setattr("litellm.acompletion", fake_acompletion)
     call = asyncio.run(_call_one("fake/a", [{"role": "user", "content": "hi"}], 5.0))
     assert isinstance(call, ModelCall)
@@ -79,6 +82,7 @@ def test_call_one_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     async def slow_acomp(*args: Any, **kwargs: Any):
         await asyncio.sleep(10)
         return None
+
     monkeypatch.setattr("litellm.acompletion", slow_acomp)
     call = asyncio.run(_call_one("fake/a", [{"role": "user", "content": "hi"}], 0.1))
     assert call.response is None
@@ -88,6 +92,7 @@ def test_call_one_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_call_one_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     async def bad_acomp(*args: Any, **kwargs: Any):
         raise RuntimeError("auth failed")
+
     monkeypatch.setattr("litellm.acompletion", bad_acomp)
     call = asyncio.run(_call_one("fake/a", [{"role": "user", "content": "hi"}], 5.0))
     assert call.response is None
@@ -99,12 +104,15 @@ def test_run_with_all_failures_returns_failure_marker(
 ) -> None:
     async def bad_acomp(*args: Any, **kwargs: Any):
         raise RuntimeError("nope")
+
     monkeypatch.setattr("litellm.acompletion", bad_acomp)
-    result = asyncio.run(engine.run(
-        prompt="anything",
-        models=["fake/a", "fake/b"],
-        analysis=TaskAnalysis(),
-    ))
+    result = asyncio.run(
+        engine.run(
+            prompt="anything",
+            models=["fake/a", "fake/b"],
+            analysis=TaskAnalysis(),
+        )
+    )
     assert result.success_count == 0
     assert "MoA failed" in result.synthesized
     assert set(result.errors.keys()) == {"fake/a", "fake/b"}
@@ -125,11 +133,13 @@ def test_run_synthesizes_when_at_least_one_succeeds(
         raise ValueError(f"unexpected model {model}")
 
     monkeypatch.setattr("litellm.acompletion", fake_acompletion)
-    result = asyncio.run(engine.run(
-        prompt="Q?",
-        models=["fake/a", "fake/b"],
-        analysis=TaskAnalysis(),
-    ))
+    result = asyncio.run(
+        engine.run(
+            prompt="Q?",
+            models=["fake/a", "fake/b"],
+            analysis=TaskAnalysis(),
+        )
+    )
     assert result.success_count == 1
     assert result.per_model == {"fake/a": "answer from A"}
     assert result.synthesized == "synthesized final answer"
@@ -138,19 +148,20 @@ def test_run_synthesizes_when_at_least_one_succeeds(
     assert engine.quota.remaining("fake/a") == 1_000_000 - 100
 
 
-def test_run_consumes_quota_for_synthesizer(
-    engine: MoAEngine, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_consumes_quota_for_synthesizer(engine: MoAEngine, monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_acompletion(model: str, *args: Any, **kwargs: Any):
         return _mk_resp(f"resp from {model}", tokens=200)
+
     monkeypatch.setattr("litellm.acompletion", fake_acompletion)
     # Pre-set synth quota
     engine.quota._write_full("fake/synth", total=500_000, last_reset=None, reset_schedule="")
-    asyncio.run(engine.run(
-        prompt="Q",
-        models=["fake/a"],
-        analysis=TaskAnalysis(),
-    ))
+    asyncio.run(
+        engine.run(
+            prompt="Q",
+            models=["fake/a"],
+            analysis=TaskAnalysis(),
+        )
+    )
     # 200 consumed from fake/a and 200 from fake/synth
     assert engine.quota.remaining("fake/a") == 1_000_000 - 200
     assert engine.quota.remaining("fake/synth") == 500_000 - 200
@@ -161,11 +172,10 @@ def test_run_requires_at_least_one_model(engine: MoAEngine) -> None:
         asyncio.run(engine.run("Q", [], TaskAnalysis()))
 
 
-def test_run_records_total_duration(
-    engine: MoAEngine, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_records_total_duration(engine: MoAEngine, monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_acompletion(*args: Any, **kwargs: Any):
         return _mk_resp("ok", tokens=10)
+
     monkeypatch.setattr("litellm.acompletion", fake_acompletion)
     result = asyncio.run(engine.run("Q", ["fake/a"], TaskAnalysis()))
     assert result.total_duration_s >= 0.0

@@ -13,19 +13,20 @@ API:
   qm.reset(model_id) -> None             # manual / scheduled reset
   qm.snapshot() -> dict                  # for orchestrator context
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
     from .model_registry import ModelRegistry
 
 log = logging.getLogger(__name__)
+
 
 # Key conventions. Hash per-model: quota:{model_id} with fields
 # total, remaining, last_reset, reset_schedule. Separate sorted set
@@ -40,9 +41,11 @@ class QuotaStore(Protocol):
     `ping` is included so the connection probe in __init__ type-checks
     against the real Redis client, not just fakeredis.
     """
+
     def ping(self) -> bool: ...
-    def hset(self, name: str, key: str | None = None, value: str | None = None,
-             mapping: dict | None = None) -> int: ...
+    def hset(
+        self, name: str, key: str | None = None, value: str | None = None, mapping: dict | None = None
+    ) -> int: ...
     def hgetall(self, name: str) -> dict: ...
     def expire(self, name: str, time: int) -> bool: ...
     def keys(self, pattern: str) -> list: ...
@@ -72,6 +75,7 @@ class QuotaManager:
         try:
             import redis  # type: ignore
             import redis.exceptions as _redis_exc  # type: ignore
+
             url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
             client = cast(QuotaStore, redis.Redis.from_url(url, decode_responses=True))
             client.ping()  # fast fail-fast check
@@ -86,6 +90,7 @@ class QuotaManager:
             # Anything else (TypeError, KeyError, …) is a real bug and
             # should surface.
             import fakeredis  # type: ignore
+
             self._r = cast(QuotaStore, fakeredis.FakeRedis(decode_responses=True))
             log.warning(
                 "QuotaManager: Redis unavailable (%s). Using in-process fakeredis.",
@@ -93,20 +98,22 @@ class QuotaManager:
             )
 
     # --- lifecycle ---
-    def sync_from_registry(self, registry: "ModelRegistry") -> int:
+    def sync_from_registry(self, registry: ModelRegistry) -> int:
         """Ensure every model in the registry has a quota entry. Returns count synced."""
         synced = 0
         for m in registry.all():
             existing = self._r.hgetall(_k(m.model_id))
             if not existing:
-                self._write_full(m.model_id, m.daily_quota_tokens or 0,
-                                 m.last_reset, m.reset_schedule or "")
+                self._write_full(m.model_id, m.daily_quota_tokens or 0, m.last_reset, m.reset_schedule or "")
             else:
                 # Keep the stored remaining; refresh schedule/total if changed.
-                self._r.hset(_k(m.model_id), mapping={
-                    "total": str(m.daily_quota_tokens or 0),
-                    "reset_schedule": m.reset_schedule or "",
-                })
+                self._r.hset(
+                    _k(m.model_id),
+                    mapping={
+                        "total": str(m.daily_quota_tokens or 0),
+                        "reset_schedule": m.reset_schedule or "",
+                    },
+                )
             synced += 1
         return synced
 
@@ -172,10 +179,13 @@ class QuotaManager:
         d = self._r.hgetall(_k(model_id))
         if not d:
             return
-        self._r.hset(_k(model_id), mapping={
-            "remaining": d.get("total", "0"),
-            "last_reset": datetime.now(timezone.utc).isoformat(),
-        })
+        self._r.hset(
+            _k(model_id),
+            mapping={
+                "remaining": d.get("total", "0"),
+                "last_reset": datetime.now(UTC).isoformat(),
+            },
+        )
 
     def reset_all(self) -> int:
         n = 0
@@ -197,8 +207,7 @@ class QuotaManager:
         Returns the number of quotas reset. Safe to call on a schedule
         (idempotent if nothing is due).
         """
-        now = now or datetime.now(timezone.utc)
-        now_iso = now.isoformat()
+        now = now or datetime.now(UTC)
         today_date = now.date()
         n = 0
         for key in self._r.keys("quota:*"):
@@ -213,7 +222,7 @@ class QuotaManager:
             try:
                 last_reset = datetime.fromisoformat(last_reset_str)
                 if last_reset.tzinfo is None:
-                    last_reset = last_reset.replace(tzinfo=timezone.utc)
+                    last_reset = last_reset.replace(tzinfo=UTC)
             except (ValueError, TypeError):
                 # Unparseable: reset now (defensive).
                 self.reset(mid)
@@ -227,7 +236,6 @@ class QuotaManager:
             elif schedule == "weekly_monday":
                 # Monday is 0 in .weekday()
                 if today_date.weekday() == 0:
-                    days_since_mon = today_date.weekday()
                     this_monday = today_date  # today IS Monday
                     # Reset if last_reset is before this Monday
                     due = last_reset.date() < this_monday
@@ -240,14 +248,16 @@ class QuotaManager:
             log.info("QuotaManager: auto-reset %d quota(s) due to schedule", n)
         return n
 
-    def _write_full(self, model_id: str, total: int,
-                    last_reset: str | None, reset_schedule: str) -> None:
-        self._r.hset(_k(model_id), mapping={
-            "total": str(total),
-            "remaining": str(total),
-            "last_reset": last_reset or datetime.now(timezone.utc).isoformat(),
-            "reset_schedule": reset_schedule,
-        })
+    def _write_full(self, model_id: str, total: int, last_reset: str | None, reset_schedule: str) -> None:
+        self._r.hset(
+            _k(model_id),
+            mapping={
+                "total": str(total),
+                "remaining": str(total),
+                "last_reset": last_reset or datetime.now(UTC).isoformat(),
+                "reset_schedule": reset_schedule,
+            },
+        )
 
 
 def snapshot_to_dict(s: QuotaSnapshot) -> dict:
@@ -275,7 +285,5 @@ if __name__ == "__main__":
     print("\nSimulating consumption of 50_000 tokens on deepseek-r1...")
     ok = qm.consume("deepseek/deepseek-r1-0528", 50_000)
     print(f"  consume ok={ok}, remaining={qm.remaining('deepseek/deepseek-r1-0528')}")
-    print("\nShould block on 999M tokens?",
-          qm.should_block("deepseek/deepseek-r1-0528", 999_000_000))
-    print("Should block on 1k tokens? ",
-          qm.should_block("deepseek/deepseek-r1-0528", 1_000))
+    print("\nShould block on 999M tokens?", qm.should_block("deepseek/deepseek-r1-0528", 999_000_000))
+    print("Should block on 1k tokens? ", qm.should_block("deepseek/deepseek-r1-0528", 1_000))

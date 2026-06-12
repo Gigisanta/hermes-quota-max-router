@@ -11,6 +11,7 @@ the first request hits the router. Three categories of checks:
 Returns a structured ValidationReport; never raises on a recoverable
 issue (that's logged), but exits non-zero on hard failures.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,9 +29,18 @@ log = logging.getLogger(__name__)
 
 
 REQUIRED_MODEL_FIELDS = {
-    "model_id", "provider", "display_name", "context_window",
-    "input_price", "output_price", "is_free", "tier_rank",
-    "strength_tags", "weakness_tags", "best_for", "performance_score",
+    "model_id",
+    "provider",
+    "display_name",
+    "context_window",
+    "input_price",
+    "output_price",
+    "is_free",
+    "tier_rank",
+    "strength_tags",
+    "weakness_tags",
+    "best_for",
+    "performance_score",
 }
 
 
@@ -62,8 +72,9 @@ class ValidationReport:
         }
 
 
-def validate_config_yaml(path: Path = REPO_ROOT / "config" / "config.yaml",
-                        report: ValidationReport | None = None) -> ValidationReport:
+def validate_config_yaml(
+    path: Path = REPO_ROOT / "config" / "config.yaml", report: ValidationReport | None = None
+) -> ValidationReport:
     report = report or ValidationReport()
     if not path.exists():
         report.add_error(f"config.yaml not found at {path}")
@@ -99,8 +110,9 @@ def validate_config_yaml(path: Path = REPO_ROOT / "config" / "config.yaml",
     return report
 
 
-def validate_models_json(path: Path = REPO_ROOT / "registry" / "models.json",
-                         report: ValidationReport | None = None) -> ValidationReport:
+def validate_models_json(
+    path: Path = REPO_ROOT / "registry" / "models.json", report: ValidationReport | None = None
+) -> ValidationReport:
     report = report or ValidationReport()
     if not path.exists():
         report.add_error(f"models.json not found at {path}")
@@ -137,8 +149,7 @@ def validate_models_json(path: Path = REPO_ROOT / "registry" / "models.json",
             report.add_error(f"model {mid} tier_rank is not an int")
 
     report.models_loaded = len(data["models"])
-    report.add_info(f"models.json: version={data.get('version', '?')}, "
-                    f"models={report.models_loaded}")
+    report.add_info(f"models.json: version={data.get('version', '?')}, models={report.models_loaded}")
     return report
 
 
@@ -146,11 +157,12 @@ def validate_redis(report: ValidationReport | None = None) -> ValidationReport:
     report = report or ValidationReport()
     try:
         import redis  # type: ignore
+
         url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         client = redis.Redis.from_url(url, decode_responses=True, socket_timeout=2)
         client.ping()
         report.add_info(f"Redis OK: {url}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         report.add_warning(
             f"Redis unavailable ({type(e).__name__}: {e}). "
             f"QuotaManager will fall back to fakeredis (in-process, not durable)."

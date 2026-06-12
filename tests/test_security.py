@@ -1,5 +1,5 @@
 """Tests for the security & resilience layer (Phase 8)."""
-import os
+
 import time
 
 import pytest
@@ -12,8 +12,8 @@ from core.security import (
     with_retry,
 )
 
-
 # --- Auth ---
+
 
 def test_require_master_key_disabled_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ROUTER_MASTER_KEY", raising=False)
@@ -49,6 +49,7 @@ def test_require_master_key_rejects_malformed_header(monkeypatch: pytest.MonkeyP
 
 
 # --- Rate limiting ---
+
 
 def test_token_bucket_allows_up_to_capacity() -> None:
     b = TokenBucket(capacity=5.0, refill_rate=0.0)  # no refill
@@ -87,6 +88,7 @@ def test_token_bucket_resets() -> None:
 
 # --- Error classification ---
 
+
 def test_is_transient_error_classifies_correctly() -> None:
     assert is_transient_error(Exception("Connection timeout")) is True
     assert is_transient_error(Exception("429 rate limit exceeded")) is True
@@ -102,22 +104,27 @@ def test_is_transient_error_handles_empty_message() -> None:
 
 # --- Retry ---
 
+
 def test_with_retry_succeeds_first_try() -> None:
     calls = []
+
     def f() -> int:
         calls.append(1)
         return 42
+
     assert with_retry(f, max_attempts=3) == 42
     assert len(calls) == 1
 
 
 def test_with_retry_retries_transient_errors() -> None:
     calls = []
+
     def f() -> str:
         calls.append(1)
         if len(calls) < 3:
             raise Exception("Connection timeout")
         return "ok"
+
     # Use a no-op sleep to keep tests fast
     assert with_retry(f, max_attempts=3, sleep=lambda _s: None) == "ok"
     assert len(calls) == 3
@@ -125,9 +132,11 @@ def test_with_retry_retries_transient_errors() -> None:
 
 def test_with_retry_does_not_retry_non_transient() -> None:
     calls = []
+
     def f() -> None:
         calls.append(1)
         raise ValueError("auth failed: invalid key")
+
     with pytest.raises(ValueError):
         with_retry(f, max_attempts=5, sleep=lambda _s: None)
     assert len(calls) == 1
@@ -135,9 +144,11 @@ def test_with_retry_does_not_retry_non_transient() -> None:
 
 def test_with_retry_exhausts_attempts() -> None:
     calls = []
+
     def f() -> None:
         calls.append(1)
         raise Exception("timeout")
+
     with pytest.raises(Exception):
         with_retry(f, max_attempts=3, sleep=lambda _s: None)
     assert len(calls) == 3
@@ -145,11 +156,13 @@ def test_with_retry_exhausts_attempts() -> None:
 
 def test_with_retry_exponential_backoff_delays() -> None:
     delays: list[float] = []
+
     def f() -> None:
         # iter 15: classifier is now structured (litellm exception types
         # + narrow substrings). "rate limit" is in the narrow fallback
         # list, so this still counts as transient.
         raise Exception("rate limit exceeded")
+
     with pytest.raises(Exception):
         with_retry(f, max_attempts=4, base_delay_s=0.5, sleep=delays.append)
     # delays should be 0.5, 1.0, 2.0 (4 attempts → 3 sleeps)
@@ -158,12 +171,13 @@ def test_with_retry_exponential_backoff_delays() -> None:
 
 def test_with_retry_caps_at_max_delay() -> None:
     delays: list[float] = []
+
     def f() -> None:
         # See note above — use a transient-classified message.
         raise Exception("timeout")
+
     with pytest.raises(Exception):
-        with_retry(f, max_attempts=6, base_delay_s=0.5, max_delay_s=1.0,
-                   sleep=delays.append)
+        with_retry(f, max_attempts=6, base_delay_s=0.5, max_delay_s=1.0, sleep=delays.append)
     # 0.5, 1.0, 1.0, 1.0, 1.0 — caps after 2nd attempt
     assert all(d <= 1.0 for d in delays)
     assert delays[0] == 0.5
@@ -174,16 +188,21 @@ def test_with_retry_classifies_httpx_timeouts_as_transient() -> None:
     """iter 15: structured classifier — httpx exception class names count as
     transient even when the message is generic."""
     calls = []
+
     class _ConnectError(Exception):
         pass
+
     class _ReadTimeout(Exception):
         pass
+
     def f1() -> None:
         calls.append(1)
         raise _ConnectError("simulated")
+
     def f2() -> None:
         calls.append(2)
         raise _ReadTimeout("simulated")
+
     with pytest.raises(_ConnectError):
         with_retry(f1, max_attempts=2, sleep=lambda _s: None)
     with pytest.raises(_ReadTimeout):
@@ -197,9 +216,11 @@ def test_with_retry_does_not_retry_unrelated_exception() -> None:
     in the retryable list and its message is 'auth failed: invalid key'
     which is not in the narrow substring fallback)."""
     calls = []
+
     def f() -> None:
         calls.append(1)
         raise ValueError("auth failed: invalid key")
+
     with pytest.raises(ValueError):
         with_retry(f, max_attempts=5, sleep=lambda _s: None)
     assert len(calls) == 1

@@ -7,6 +7,7 @@ Pricing lives in the registry (input_price, output_price per token).
 all calls since process start. Useful for the dashboard and for
 budget alerts. For persistence, swap the dict for Redis.
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,13 +17,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .model_registry import ModelRegistry
-    from .schemas import RoutingDecision
 
 log = logging.getLogger(__name__)
 
 
 def compute_cost_usd(
-    registry: "ModelRegistry",
+    registry: ModelRegistry,
     model_id: str,
     input_tokens: int,
     output_tokens: int,

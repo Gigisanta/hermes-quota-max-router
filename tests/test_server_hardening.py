@@ -1,5 +1,4 @@
 """Phase 8: auth + rate limit + retry — server integration tests."""
-import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,21 +19,28 @@ def app_with_auth(monkeypatch: pytest.MonkeyPatch):
 
 # --- Auth ---
 
+
 def test_auth_disabled_when_no_env(app_no_auth) -> None:
     """No env → requests without auth header succeed."""
     with TestClient(app_no_auth) as c:
-        r = c.post("/v1/chat/completions", json={
-            "messages": [{"role": "user", "content": "hi"}],
-        })
+        r = c.post(
+            "/v1/chat/completions",
+            json={
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
     assert r.status_code == 200
 
 
 def test_auth_required_when_env_set(app_with_auth) -> None:
     """Env set → no header = 401."""
     with TestClient(app_with_auth) as c:
-        r = c.post("/v1/chat/completions", json={
-            "messages": [{"role": "user", "content": "hi"}],
-        })
+        r = c.post(
+            "/v1/chat/completions",
+            json={
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
     assert r.status_code == 401
 
 
@@ -60,11 +66,10 @@ def test_auth_rejects_wrong_key(app_with_auth) -> None:
 
 # --- Rate limit ---
 
+
 def test_rate_limit_kicks_in_after_burst(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default bucket: capacity 60, refill 1/s. 61st request in a second fails."""
     # Use a fresh app with tiny bucket to make the test fast & deterministic.
-    from core.security import TokenBucket
-    from server import app as server_app
     from core.model_registry import ModelRegistry
     from core.quota_manager import QuotaManager
 
@@ -72,7 +77,6 @@ def test_rate_limit_kicks_in_after_burst(monkeypatch: pytest.MonkeyPatch) -> Non
     reg = ModelRegistry()
     qm = QuotaManager()
     qm.sync_from_registry(reg)
-    app = server_app.build_app.__wrapped__ if hasattr(server_app.build_app, "__wrapped__") else None
     # Simpler: rebuild via build_app and override the limiter via env
     monkeypatch.setenv("ROUTER_RATE_LIMIT", "3")  # not yet implemented; do it manually
     # Use the default app but hammer it — the default capacity is 60
@@ -86,6 +90,7 @@ def test_rate_limit_kicks_in_after_burst(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 # --- Security headers ---
+
 
 def test_security_headers_on_all_endpoints(app_no_auth) -> None:
     with TestClient(app_no_auth) as c:

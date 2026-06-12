@@ -1,9 +1,10 @@
 """
 Tests for QuotaManager.maybe_reset_due() auto-reset logic.
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -44,17 +45,19 @@ def qm():
     q = QuotaManager(store=store)  # type: ignore[arg-type]
     # Freeze 'now' to midday UTC to avoid TZ-edge flakiness around midnight UTC,
     # where (now - 2h) would actually be yesterday's date.
-    frozen_now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+    frozen_now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
     return q, store, frozen_now
 
 
-def _seed_quota(store, model_id, total=1000, remaining=200, last_reset_iso=None, schedule="daily_at_midnight"):
+def _seed_quota(
+    store, model_id, total=1000, remaining=200, last_reset_iso=None, schedule="daily_at_midnight"
+):
     store.hset(
         f"quota:{model_id}",
         mapping={
             "total": str(total),
             "remaining": str(remaining),
-            "last_reset": last_reset_iso or datetime.now(timezone.utc).isoformat(),
+            "last_reset": last_reset_iso or datetime.now(UTC).isoformat(),
             "reset_schedule": schedule,
         },
     )

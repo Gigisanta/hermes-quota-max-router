@@ -23,6 +23,7 @@ Usage:
   )
   # -> MoAResult(synthesized="...", per_model={"deepseek/...": "...", ...})
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +31,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from .model_registry import ModelRegistry
 from .quota_manager import QuotaManager
@@ -73,6 +73,7 @@ async def _call_one(
 ) -> ModelCall:
     """Run a single model call with timeout + error capture."""
     from litellm import acompletion  # type: ignore
+
     started = time.monotonic()
     try:
         resp = await asyncio.wait_for(
@@ -88,9 +89,9 @@ async def _call_one(
             duration_s=time.monotonic() - started,
             tokens=tokens,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return ModelCall(model_id=model_id, error="timeout", duration_s=time.monotonic() - started)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return ModelCall(model_id=model_id, error=str(e)[:200], duration_s=time.monotonic() - started)
 
 
@@ -102,7 +103,7 @@ async def _synthesize(
 ) -> tuple[str, int]:
     from litellm import acompletion  # type: ignore
 
-    sys_prompt = Path(SYNTH_PROMPT_PATH).read_text()
+    sys_prompt = await asyncio.to_thread(Path(SYNTH_PROMPT_PATH).read_text)
     user_payload = {
         "question": original_prompt,
         "responses": [{"model": mid, "answer": ans} for mid, ans in responses.items()],
@@ -167,7 +168,7 @@ class MoAEngine:
                 # so the event loop stays free.
                 try:
                     await asyncio.to_thread(self.quota.consume, c.model_id, c.tokens)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     log.warning("moa quota.consume failed for %s: %s", c.model_id, e)
             elif c.error:
                 errors[c.model_id] = c.error
@@ -184,7 +185,10 @@ class MoAEngine:
         # Synthesize
         try:
             synth, synth_tokens = await _synthesize(
-                self.synthesizer_model, prompt, per_model, self.timeout_s,
+                self.synthesizer_model,
+                prompt,
+                per_model,
+                self.timeout_s,
             )
             total_tokens += synth_tokens
             # iter 15: same as above — non-blocking quota update.
@@ -216,13 +220,15 @@ class MoAEngine:
 
 # --- Sync wrapper for environments without an event loop (e.g. dashboard) ---
 
-def run_sync(engine: "MoAEngine", prompt: str, models: list[str], analysis: TaskAnalysis) -> MoAResult:
+
+def run_sync(engine: MoAEngine, prompt: str, models: list[str], analysis: TaskAnalysis) -> MoAResult:
     """Convenience: run MoA from synchronous code."""
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
             # We're inside an existing loop (e.g. Jupyter). Use a thread.
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                 return ex.submit(asyncio.run, engine.run(prompt, models, analysis)).result()
         return asyncio.run(engine.run(prompt, models, analysis))
@@ -234,6 +240,7 @@ if __name__ == "__main__":
     # Smoke: dry-run the engine without hitting the network. Just verifies
     # the orchestration logic doesn't crash on edge cases.
     from .quota_manager import QuotaManager
+
     reg = ModelRegistry()
     qm = QuotaManager()
     qm.sync_from_registry(reg)

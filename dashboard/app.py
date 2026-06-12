@@ -12,9 +12,9 @@ printed URL. The dashboard exposes:
 The chat tab calls the router over HTTP. If the router is not running
 or is in stub mode, the response is clearly marked as such.
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
@@ -23,16 +23,17 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from core.auto_updater import LocalFeedProvider, RegistryUpdater
 from core.model_registry import ModelRegistry
+from core.orchestrator import RuleBasedOrchestrator
 from core.quota_manager import QuotaManager
 from core.task_analyzer import HeuristicTaskAnalyzer
-from core.orchestrator import RuleBasedOrchestrator
-from core.auto_updater import LocalFeedProvider, RegistryUpdater
 
 log = logging.getLogger(__name__)
 
 
 # --- Helpers (no Gradio imports here so this module is testable headless) ---
+
 
 def build_state() -> dict:
     """Build the runtime state shared across all UI tabs."""
@@ -64,10 +65,7 @@ def format_quota_table(qm: QuotaManager) -> str:
     rows = ["| Model | Remaining | Total | % |", "|---|---|---|---|"]
     for s in qm.all_snapshots():
         if s.has_quota() and s.total:
-            rows.append(
-                f"| `{s.model_id}` | {s.remaining:,} | {s.total:,} | "
-                f"{s.pct_remaining:.1%} |"
-            )
+            rows.append(f"| `{s.model_id}` | {s.remaining:,} | {s.total:,} | {s.pct_remaining:.1%} |")
         else:
             rows.append(f"| `{s.model_id}` | ∞ | — | paid |")
     return "\n".join(rows)
@@ -80,7 +78,7 @@ def _get_router_base_url() -> str:
 
 def _is_stub_response(body: dict) -> bool:
     """Stub-mode responses are flagged so the UI can mark them clearly."""
-    content = (body.get("choices", [{}])[0].get("message", {}).get("content") or "")
+    content = body.get("choices", [{}])[0].get("message", {}).get("content") or ""
     return content.startswith("[stub:") or content.startswith("[Stub mode")
 
 
@@ -109,7 +107,7 @@ def _fetch_live_models() -> dict:
     items = data if isinstance(data, list) else data.get("data", [])
     ids = [str(m.get("id")) for m in items if isinstance(m, dict) and m.get("id")]
     return {
-        "choices": ["auto"] + ids,
+        "choices": ["auto", *ids],
         "value": "auto",
         "info": f"{len(ids)} models available",
     }
@@ -131,6 +129,7 @@ def run_chat(
 
     # Then actually call the router over HTTP for a real response.
     import time
+
     import httpx
 
     base = _get_router_base_url()
@@ -200,7 +199,7 @@ def run_updater(feed_path: str) -> str:
         result = updater.apply_feed(feed_models)
         # Re-sync quota store (new models need entries)
         state["quota"].sync_from_registry(state["registry"])
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"❌ Update failed: {e}"
 
     lines = [
@@ -266,8 +265,7 @@ def build_gradio_app():
                         choices=["auto"],
                         value="auto",
                         info=(
-                            "Click 'Refresh models' to populate the list "
-                            "from the live router's /v1/models."
+                            "Click 'Refresh models' to populate the list from the live router's /v1/models."
                         ),
                     )
                     refresh_models_btn = gr.Button("Refresh models", size="sm")
@@ -278,11 +276,13 @@ def build_gradio_app():
                     metrics_box = gr.Markdown(label="Live metrics")
                     status_box = gr.Markdown()
             send.click(
-                _run_chat_for_gradio, inputs=[msg, model_choice],
+                _run_chat_for_gradio,
+                inputs=[msg, model_choice],
                 outputs=[decision_box, response_box, metrics_box, status_box],
             )
             refresh_models_btn.click(
-                _fetch_live_models, inputs=[],
+                _fetch_live_models,
+                inputs=[],
                 outputs=[model_choice],
             )
 
@@ -290,7 +290,8 @@ def build_gradio_app():
             quota_md = gr.Markdown(format_quota_table(state["quota"]))
             refresh = gr.Button("Refresh")
             refresh.click(
-                _refresh_quota_table, inputs=[],
+                _refresh_quota_table,
+                inputs=[],
                 outputs=[quota_md],
             )
 
@@ -302,7 +303,9 @@ def build_gradio_app():
             update_btn = gr.Button("Apply feed", variant="primary")
             update_out = gr.Markdown()
             update_btn.click(
-                run_updater, inputs=[feed_path], outputs=update_out,
+                run_updater,
+                inputs=[feed_path],
+                outputs=update_out,
             )
 
     return app

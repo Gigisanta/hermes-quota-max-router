@@ -15,6 +15,7 @@ Usage:
   python scripts/install_hermes_plugin.py           # install
   python scripts/install_hermes_plugin.py --uninstall  # remove
 """
+
 from __future__ import annotations
 
 import argparse
@@ -81,15 +82,18 @@ def patch_config_yaml() -> None:
 
     # 1) auxiliary.quotamax_subagent
     aux = cfg.setdefault("auxiliary", {})
-    aux.setdefault("quotamax_subagent", {
-        "provider": "quotamax-router",
-        "model": "auto",
-        "base_url": "${QUOTAMAX_BASE_URL:-http://127.0.0.1:8088/v1}",
-        "api_key": "${QUOTAMAX_API_KEY:-}",
-        "api_mode": "chat_completions",
-        "timeout": 60,
-        "extra_body": {},
-    })
+    aux.setdefault(
+        "quotamax_subagent",
+        {
+            "provider": "quotamax-router",
+            "model": "auto",
+            "base_url": "${QUOTAMAX_BASE_URL:-http://127.0.0.1:8088/v1}",
+            "api_key": "${QUOTAMAX_API_KEY:-}",
+            "api_mode": "chat_completions",
+            "timeout": 60,
+            "extra_body": {},
+        },
+    )
     print("OK   : auxiliary.quotamax_subagent set")
 
     # 2) delegation.subagent_models.quotamax
@@ -100,7 +104,7 @@ def patch_config_yaml() -> None:
 
     out = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
     CONFIG_PATH.write_text(out)
-    print(f"OK   : config.yaml updated")
+    print("OK   : config.yaml updated")
 
 
 def unpatch_config_yaml() -> None:
@@ -128,9 +132,11 @@ def verify() -> None:
     print("\n=== Verification ===")
     sys.path.insert(0, str(HERMES_HOME / "hermes-agent"))
     import providers  # type: ignore
+
     providers._discovered = False
     providers._REGISTRY.clear()
     from providers import get_provider_profile  # type: ignore
+
     profile = get_provider_profile(PLUGIN_NAME)
     if profile is None:
         print("FAIL: plugin not discovered by Hermes", file=sys.stderr)

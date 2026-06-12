@@ -1,51 +1,55 @@
 """Tests for the Model Registry (Phase 1)."""
+
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
 
-from core.model_registry import Model, ModelRegistry
+from core.model_registry import ModelRegistry
 
 
 @pytest.fixture
 def tmp_registry(tmp_path: Path) -> ModelRegistry:
     db = tmp_path / "reg.sqlite"
     seed = tmp_path / "seed.json"
-    seed.write_text(json.dumps({
-        "models": [
+    seed.write_text(
+        json.dumps(
             {
-                "model_id": "test/free-1",
-                "provider": "test",
-                "display_name": "Test Free 1",
-                "context_window": 100000,
-                "input_price": 0.0,
-                "output_price": 0.0,
-                "is_free": True,
-                "tier_rank": 1,
-                "strength_tags": ["deep_reasoning"],
-                "weakness_tags": [],
-                "best_for": ["coding"],
-                "performance_score": 90.0,
-                "notes": "seed",
-            },
-            {
-                "model_id": "test/paid-1",
-                "provider": "test",
-                "display_name": "Test Paid 1",
-                "context_window": 100000,
-                "input_price": 0.0001,
-                "output_price": 0.0003,
-                "is_free": False,
-                "tier_rank": 99,
-                "strength_tags": ["agentic_god"],
-                "weakness_tags": [],
-                "best_for": ["orchestration"],
-                "performance_score": 95.0,
-                "notes": "preserve",
-            },
-        ]
-    }))
+                "models": [
+                    {
+                        "model_id": "test/free-1",
+                        "provider": "test",
+                        "display_name": "Test Free 1",
+                        "context_window": 100000,
+                        "input_price": 0.0,
+                        "output_price": 0.0,
+                        "is_free": True,
+                        "tier_rank": 1,
+                        "strength_tags": ["deep_reasoning"],
+                        "weakness_tags": [],
+                        "best_for": ["coding"],
+                        "performance_score": 90.0,
+                        "notes": "seed",
+                    },
+                    {
+                        "model_id": "test/paid-1",
+                        "provider": "test",
+                        "display_name": "Test Paid 1",
+                        "context_window": 100000,
+                        "input_price": 0.0001,
+                        "output_price": 0.0003,
+                        "is_free": False,
+                        "tier_rank": 99,
+                        "strength_tags": ["agentic_god"],
+                        "weakness_tags": [],
+                        "best_for": ["orchestration"],
+                        "performance_score": 95.0,
+                        "notes": "preserve",
+                    },
+                ]
+            }
+        )
+    )
     return ModelRegistry(db_path=db, seed_path=seed)
 
 
