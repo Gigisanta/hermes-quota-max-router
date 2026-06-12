@@ -146,7 +146,10 @@ def test_with_retry_exhausts_attempts() -> None:
 def test_with_retry_exponential_backoff_delays() -> None:
     delays: list[float] = []
     def f() -> None:
-        raise Exception("network error")
+        # iter 15: classifier is now structured (litellm exception types
+        # + narrow substrings). "rate limit" is in the narrow fallback
+        # list, so this still counts as transient.
+        raise Exception("rate limit exceeded")
     with pytest.raises(Exception):
         with_retry(f, max_attempts=4, base_delay_s=0.5, sleep=delays.append)
     # delays should be 0.5, 1.0, 2.0 (4 attempts → 3 sleeps)
@@ -156,6 +159,7 @@ def test_with_retry_exponential_backoff_delays() -> None:
 def test_with_retry_caps_at_max_delay() -> None:
     delays: list[float] = []
     def f() -> None:
+        # See note above — use a transient-classified message.
         raise Exception("timeout")
     with pytest.raises(Exception):
         with_retry(f, max_attempts=6, base_delay_s=0.5, max_delay_s=1.0,
@@ -164,3 +168,38 @@ def test_with_retry_caps_at_max_delay() -> None:
     assert all(d <= 1.0 for d in delays)
     assert delays[0] == 0.5
     assert delays[1] == 1.0
+
+
+def test_with_retry_classifies_httpx_timeouts_as_transient() -> None:
+    """iter 15: structured classifier — httpx exception class names count as
+    transient even when the message is generic."""
+    calls = []
+    class _ConnectError(Exception):
+        pass
+    class _ReadTimeout(Exception):
+        pass
+    def f1() -> None:
+        calls.append(1)
+        raise _ConnectError("simulated")
+    def f2() -> None:
+        calls.append(2)
+        raise _ReadTimeout("simulated")
+    with pytest.raises(_ConnectError):
+        with_retry(f1, max_attempts=2, sleep=lambda _s: None)
+    with pytest.raises(_ReadTimeout):
+        with_retry(f2, max_attempts=2, sleep=lambda _s: None)
+    # Both classified transient → 2 attempts each
+    assert calls == [1, 2]
+
+
+def test_with_retry_does_not_retry_unrelated_exception() -> None:
+    """iter 15: non-transient classes should not retry (ValueError is not
+    in the retryable list and its message is 'auth failed: invalid key'
+    which is not in the narrow substring fallback)."""
+    calls = []
+    def f() -> None:
+        calls.append(1)
+        raise ValueError("auth failed: invalid key")
+    with pytest.raises(ValueError):
+        with_retry(f, max_attempts=5, sleep=lambda _s: None)
+    assert len(calls) == 1

@@ -147,7 +147,25 @@ def build_app(
     `live` defaults to False (stubs) to keep tests deterministic even
     when developer shells contain real API keys. Set ROUTER_LIVE=1 or
     pass live=True to force real provider calls.
+
+    Security: the server REFUSES TO START if `ROUTER_MASTER_KEY` is unset
+    and `ROUTER_ALLOW_INSECURE_NO_AUTH` is not explicitly set to `1`. This
+    is the iter 15 fix for the "if master_key: silently disables auth"
+    hole. To run a public dev instance, set `ROUTER_ALLOW_INSECURE_NO_AUTH=1`
+    in the environment.
     """
+    _master_key = os.environ.get("ROUTER_MASTER_KEY", "").strip()
+    _allow_insecure = os.environ.get("ROUTER_ALLOW_INSECURE_NO_AUTH", "").strip().lower() in {
+        "1", "true", "yes",
+    }
+    if not _master_key and not _allow_insecure:
+        raise RuntimeError(
+            "ROUTER_MASTER_KEY is not set. Either set it to a strong secret, "
+            "or explicitly opt in to unauthenticated dev mode by setting "
+            "ROUTER_ALLOW_INSECURE_NO_AUTH=1. Refusing to start the server "
+            "with auth silently disabled."
+        )
+
     env_live = os.environ.get("ROUTER_LIVE", "").strip().lower()
     if env_live in ("1", "true", "yes"):
         live = True
@@ -267,22 +285,50 @@ def build_app(
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next):
         response = await call_next(request)
+        # Existing baseline (Phase 8)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        # Added in iter 15: HSTS, CSP, Permissions-Policy.
+        # HSTS only makes sense behind TLS, but we set it anyway — proxies
+        # can strip or override. CSP is strict because the JSON API is
+        # never rendered as HTML; we explicitly deny all sources.
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+        )
+        response.headers.setdefault(
+            "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
+        )
+        response.headers.setdefault(
+            "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+        )
         return response
 
     # --- dependencies ---
 
     def auth_and_rate_limit(request: Request) -> str:
-        """Combined: auth + rate limit. Returns the client key for logging."""
+        """Combined: auth + rate limit. Returns the client key for logging.
+
+        Auth model (iter 15 hardening):
+        - If `ROUTER_MASTER_KEY` is set, the request MUST carry a matching
+          `Authorization: Bearer *** header. Constant-time compare.
+        - If `ROUTER_MASTER_KEY` is NOT set, the server will REFUSE TO
+          START unless `ROUTER_ALLOW_INSECURE_NO_AUTH=1` is also set.
+          This is enforced in `build_app()` below. By the time we reach
+          this dependency, we know either auth is configured or the
+          operator opted in to dev mode.
+        """
         # 1. Auth (captured at app build time, not read dynamically per request)
         if master_key:
             auth = request.headers.get("authorization")
             if not auth or not auth.startswith("Bearer "):
-                raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+                raise HTTPException(
+                    status_code=401, detail="Missing or invalid Authorization header"
+                )
             provided = auth.removeprefix("Bearer ").strip()
-            if provided != master_key:
+            # constant-time compare (best-effort, key is in env)
+            import hmac as _hmac
+            if not _hmac.compare_digest(provided.encode("utf-8"), master_key.encode("utf-8")):
                 raise HTTPException(status_code=401, detail="Invalid API key")
         # 2. Rate limit (per IP, falls back to "unknown")
         client_ip = request.client.host if request.client else "unknown"
@@ -558,17 +604,27 @@ def build_app(
     return app
 
 
-# Entry point for `uvicorn server.app:app`
-app = build_app(live=False)
+# iter 15: removed module-level `app = build_app(live=False)` because it
+# ran at import time and the hardened `build_app()` refuses to start
+# without a master key. We use the FastAPI factory pattern instead:
+#
+#   uvicorn server.app:build_app --factory
+#
+# For the CLI: `python -m server.app` still works (see `main()` below).
+# For tests: callers explicitly invoke `build_app(live=False)` themselves.
+# This file is therefore safe to import without side-effects.
 
 
 def main() -> int:
     import uvicorn
     port = int(os.environ.get("ROUTER_HTTP_PORT", "8080"))
+    # iter 15: pass the factory to uvicorn rather than the (now removed)
+    # module-level `app` symbol.
     uvicorn.run(
-        "server.app:app",
+        "server.app:build_app",
         host="127.0.0.1",
         port=port,
+        factory=True,
         log_level="info",
     )
     return 0
