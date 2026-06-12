@@ -659,11 +659,13 @@ def main() -> int:
     import uvicorn
 
     port = int(os.environ.get("ROUTER_HTTP_PORT", "8080"))
+    # Loopback by default; set ROUTER_HTTP_HOST=0.0.0.0 to expose (e.g. Docker).
+    host = os.environ.get("ROUTER_HTTP_HOST", "127.0.0.1")
     # iter 15: pass the factory to uvicorn rather than the (now removed)
     # module-level `app` symbol.
     uvicorn.run(
         "server.app:build_app",
-        host="127.0.0.1",
+        host=host,
         port=port,
         factory=True,
         log_level="info",
