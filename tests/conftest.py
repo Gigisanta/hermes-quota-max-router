@@ -66,10 +66,20 @@ def _clean_router_env(monkeypatch, tmp_path):
     """Strip router-related env vars before every test and isolate SQLite dbs.
 
     `monkeypatch.setenv`/`delenv` is automatically reverted at test teardown.
+
+    iter 15: also set `ROUTER_ALLOW_INSECURE_NO_AUTH=1` so that the
+    hardened `build_app()` does not refuse to start in tests. Real auth
+    behavior is exercised by tests that explicitly set
+    `ROUTER_MASTER_KEY` and check that it is required.
     """
     # 1. Remove any vars that could influence build_app() or the quota manager.
     for var in _ENV_VARS_TO_CLEAR:
         monkeypatch.delenv(var, raising=False)
+
+    # 1b. iter 15: opt-in to the unauthenticated dev mode for the test
+    # session. Tests that need real auth set ROUTER_MASTER_KEY and
+    # exercise that path explicitly.
+    monkeypatch.setenv("ROUTER_ALLOW_INSECURE_NO_AUTH", "1")
 
     # 2. Set dummy provider keys so the registry is fully "available" for
     #    routing tests. These are not used to make real calls.

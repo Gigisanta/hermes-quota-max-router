@@ -76,6 +76,12 @@ class RouterCallResult:
             "confidence": self.decision.confidence,
             "error": self.error,
         }
+        # iter 15 fix: include `tool_calls` (was silently dropped, see
+        # the iter 15 changelog). JSON-safe serialization: the tool_calls
+        # payload comes from litellm and may contain non-JSON-native types;
+        # the default str() in json.dumps is OK for the audit trail.
+        if self.tool_calls:
+            d["tool_calls"] = self.tool_calls
         if self.analysis:
             d["task_type"] = self.analysis.task_type
             d["tags"] = self.analysis.required_tags
@@ -316,19 +322,39 @@ class RouterEngine:
                 kwargs["tools"] = tools
             if tool_choice is not None:
                 kwargs["tool_choice"] = tool_choice
-            resp = completion(**kwargs)
-            message = resp["choices"][0]["message"] or {}
-            tool_calls = message.get("tool_calls") or None
-            return {
-                "content": (message.get("content") or ""),
-                "error": None,
-                "usage": dict(resp.get("usage") or {}),
-                "tool_calls": tool_calls,
-            }
-        except Exception as e:  # noqa: BLE001
+            # iter 15: actually wire `with_retry` into the hot path.
+            # Previously the function existed in core.security but was
+            # imported (server/app.py:51) yet never called; transient
+            # errors cascaded straight to fallback. Now we attempt up to
+            # 3 calls with exponential backoff before giving up.
+            from .security import with_retry as _with_retry
+
+            def _do() -> dict[str, Any]:
+                resp = completion(**kwargs)
+                message = resp["choices"][0]["message"] or {}
+                tool_calls = message.get("tool_calls") or None
+                return {
+                    "content": (message.get("content") or ""),
+                    "error": None,
+                    "usage": dict(resp.get("usage") or {}),
+                    "tool_calls": tool_calls,
+                }
+
+            try:
+                return _with_retry(_do, max_attempts=3, base_delay_s=0.3, max_delay_s=4.0)
+            except Exception as e:  # noqa: BLE001
+                return {
+                    "content": "",
+                    "error": str(e)[:200],
+                    "usage": {},
+                    "tool_calls": None,
+                }
+        except ImportError:
+            # litellm not installed (e.g. in minimal CI); surface as
+            # transient so the fallback path takes over.
             return {
                 "content": "",
-                "error": str(e)[:200],
+                "error": "litellm not installed",
                 "usage": {},
                 "tool_calls": None,
             }

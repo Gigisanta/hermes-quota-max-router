@@ -102,17 +102,69 @@ class TokenBucket:
 
 # --- Error classification ---
 
-_TRANSIENT_KEYWORDS = (
-    "timeout", "timed out", "connection", "network",
-    "rate limit", "429", "500", "502", "503", "504",
-    "temporarily", "unavailable", "try again",
-)
+# Structured exception classification (iter 15 hardening). Previously the
+# router used a string-substring match on the error message, which had
+# false positives like "Connection error from billing" (intentional 4xx)
+# triggering a retry. We now use the actual litellm exception classes
+# (with safe fallbacks for tests / minimal installs).
+
+try:
+    import litellm.exceptions as _litellm_exceptions  # noqa: F401
+    _RETRYABLE_EXC_TYPES: tuple[type, ...] = (
+        _litellm_exceptions.APIConnectionError,
+        _litellm_exceptions.Timeout,
+        _litellm_exceptions.ServiceUnavailableError,
+        _litellm_exceptions.InternalServerError,
+        _litellm_exceptions.RateLimitError,
+    )
+    _API_ERROR_TYPE = _litellm_exceptions.APIError
+    _LITELLM_EXCEPTIONS_AVAILABLE = True
+except ImportError:  # pragma: no cover — litellm is optional in tests
+    _RETRYABLE_EXC_TYPES = ()
+    _API_ERROR_TYPE = None
+    _LITELLM_EXCEPTIONS_AVAILABLE = False
+
+# HTTP status codes that are safe to retry.
+_RETRYABLE_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 522, 524})
 
 
 def is_transient_error(exc: Exception) -> bool:
-    """True if the error is worth retrying (network, rate limit, 5xx)."""
+    """True if the error is worth retrying (network, rate limit, 5xx).
+
+    iter 15: classify via litellm exception types when available, else
+    fall back to a curated list of substrings (kept narrow to avoid the
+    previous false-positives like "Connection error from billing").
+    """
+    # 1. Structured: litellm exception types (preferred path).
+    if _LITELLM_EXCEPTIONS_AVAILABLE and _RETRYABLE_EXC_TYPES:
+        if isinstance(exc, _RETRYABLE_EXC_TYPES):
+            return True
+        if _API_ERROR_TYPE is not None and isinstance(exc, _API_ERROR_TYPE):
+            # Some APIError carry .status_code; only retry on 5xx / 408 / 429.
+            status = getattr(exc, "status_code", None)
+            if status in _RETRYABLE_STATUSES:
+                return True
+        # httpx-style errors often surface as HTTPError; check by type name
+        # to avoid importing httpx at module top.
+        cls_name = type(exc).__name__
+        if cls_name in {"ConnectError", "ReadTimeout", "WriteTimeout", "PoolTimeout"}:
+            return True
+
+    # 2. Fallback: narrow substring match (replaces the old broad match).
     msg = (str(exc) or "").lower()
-    return any(kw in msg for kw in _TRANSIENT_KEYWORDS)
+    return any(
+        kw in msg
+        for kw in (
+            "rate limit", "rate-limit", "ratelimit",
+            " 429", "429 ", "http 429",
+            " 500", "500 ", "http 500",
+            " 502", "502 ", "http 502",
+            " 503", "503 ", "http 503",
+            " 504", "504 ", "http 504",
+            "service unavailable", "temporarily unavailable",
+            "timeout", "timed out", "connection reset", "connection aborted",
+        )
+    )
 
 
 # --- Retry with exponential backoff ---
