@@ -59,6 +59,10 @@ _PROVIDER_KEY_ENV: dict[str, tuple[str, ...]] = {
     "mistral": ("MISTRAL_API_KEY",),
     "together": ("TOGETHER_API_KEY",),
     "fireworks": ("FIREWORKS_API_KEY",),
+    # iter 15: added providers from the catalog gap fill.
+    "cerebras": ("CEREBRAS_API_KEY",),
+    "sambanova": ("SAMBANOVA_API_KEY",),
+    "minimax": ("LOCAL_OPENAI_API_KEY",),  # self-hosted M3 weights via vLLM/Ollama
 }
 
 
@@ -193,10 +197,10 @@ class RuleBasedOrchestrator:
         all_models = registry.all()
         # Hard filter: only consider models whose provider key is in env.
         # Avoids 401s on every call when a key is missing.
-        free_all = [m for m in all_models if m.is_free and has_key_for_model(m)]
-        paid_all = [m for m in all_models if (not m.is_free) and has_key_for_model(m)]
-        free = free_all
-        paid = paid_all
+        # iter 15: removed the `free_all`/`paid_all` aliases (dead) and
+        # collapsed to a single pass.
+        free = [m for m in all_models if m.is_free and has_key_for_model(m)]
+        paid = [m for m in all_models if (not m.is_free) and has_key_for_model(m)]
 
         # Score every free model, hard-veto blocked ones
         scored_free: list[tuple[float, Model]] = []

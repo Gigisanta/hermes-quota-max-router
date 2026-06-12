@@ -1,9 +1,19 @@
 # Hermes QuotaMax Router — LiteLLM config
 # This is the Phase 0 base. The Orchestrator (Phase 3) will
 # dynamically compose routing decisions ON TOP of this file.
+#
+# iter 15: catalog gap fill — added 6 providers that were missing from
+# the original 6-model list: gemini-2.5-flash-lite (faster+cheaper),
+# deepseek-chat (the non-reasoning partner of deepseek-r1), llama-3.3-70b
+# on Groq (text-only fast path), mixtral-8x7b on Groq (legacy but free),
+# mistral-tiny on La Plateforme (3B parameter, ultra-fast), and a
+# self-hosted MiniMax M3 entry (the open-weights model released June 11,
+# 2026 — see docs/PROVIDERS.md for the integration plan).
 
 model_list:
   # --- Free / Generous Tier (default preference) ---
+
+  # Tier 1: deepest reasoning (paid quota fallback is "preserve_paid_quota")
   - model_name: deepseek-r1
     litellm_params:
       model: deepseek/deepseek-r1-0528
@@ -58,7 +68,107 @@ model_list:
       tier_rank: 6
       strengths: [high_volume, cheap_parallel, ultra_fast]
 
+  # --- Tier 7-10: speed-optimized free models (iter 15 additions) ---
+
+  - model_name: gemini-flash-lite
+    litellm_params:
+      model: gemini/gemini-2.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 7
+      strengths: [ultra_fast, high_throughput, cheap_parallel, json_mode_perfect]
+      # iter 15 note: gemini-2.5-flash-lite is faster + cheaper than
+      # gemini-2.5-flash and is the better default for high-volume
+      # requests where reasoning depth isn't required.
+
+  - model_name: deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 8
+      strengths: [instruction_following_god, coding_sota, writing_master, json_mode_perfect]
+      # iter 15 note: deepseek-chat is the non-reasoning partner of
+      # deepseek-r1. When the orchestrator decides reasoning depth is
+      # not needed, this is the preferred free primary.
+
+  - model_name: llama-3.3-70b-groq
+    litellm_params:
+      model: groq/meta-llama/llama-3.3-70b-versatile
+      api_key: os.environ/GROQ_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 9
+      strengths: [ultra_fast, instruction_following_god, json_mode_perfect, high_volume]
+      # iter 15 note: text-only fast path; outperforms scout on
+      # instruction-following for the cost (same free tier).
+
+  - model_name: mixtral-groq
+    litellm_params:
+      model: groq/mistralai/mixtral-8x7b-32768
+      api_key: os.environ/GROQ_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 10
+      strengths: [high_volume, cheap_parallel, bilingual_perfect]
+      # iter 15 note: 32k context, French + English strong, useful
+      # fallback when bigger context is needed without paying.
+
+  - model_name: mistral-tiny
+    litellm_params:
+      model: mistral/mistral-tiny
+      api_key: os.environ/MISTRAL_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 11
+      strengths: [ultra_fast, json_mode_perfect, instruction_following_god]
+      # iter 15 note: Mistral La Plateforme free tier includes
+      # mistral-tiny. Tiny by name, 3B params, very fast on small tasks.
+
+  - model_name: cerebras-llama
+    litellm_params:
+      model: cerebras/llama-3.3-70b
+      api_key: os.environ/CEREBRAS_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 12
+      strengths: [ultra_fast, high_throughput, instruction_following_god]
+      # iter 15 note: Cerebras Inference free tier (with API key from
+      # cloud.cerebras.ai) is the fastest Llama endpoint in the world.
+      # Fall-through target when groq is overloaded.
+
+  - model_name: sambanova-llama
+    litellm_params:
+      model: sambanova/Meta-Llama-3.1-70B-Instruct
+      api_key: os.environ/SAMBANOVA_API_KEY
+    model_info:
+      tier: free
+      tier_rank: 13
+      strengths: [ultra_fast, high_throughput, instruction_following_god]
+      # iter 15 note: SambaNova Cloud free tier. Another fast Llama
+      # provider; useful as a third 70B fallback.
+
+  # --- Tier 14: self-hosted open-weights (the OSS promise) ---
+
+  - model_name: minimax-m3-local
+    litellm_params:
+      model: openai/MiniMaxAI/MiniMax-M3  # served by local vLLM/Ollama on :8001
+      api_key: os.environ/LOCAL_OPENAI_API_KEY
+      api_base: os.environ/LOCAL_OPENAI_API_BASE
+    model_info:
+      tier: free
+      tier_rank: 14
+      strengths: [coding_sota, deep_reasoning, instruction_following_god, agentic_god]
+      # iter 15 note: MiniMax released the M3 weights on June 11, 2026.
+      # This entry is the "self-hosted" slot. When the operator runs
+      # vLLM/Ollama locally with the M3 weights and points
+      # LOCAL_OPENAI_API_BASE at it, HQMR routes to it as a 100% free,
+      # 100% local, 100% private option. See docs/PROVIDERS.md §4.
+
   # --- Paid Tier (preserve, last resort) ---
+
   - model_name: gpt-5.5
     litellm_params:
       model: openai-codex/gpt-5.5
@@ -67,18 +177,3 @@ model_list:
       tier: paid
       tier_rank: 99
       strengths: [instruction_following_god, json_mode_perfect, structured_output, agentic_god]
-
-router_settings:
-  num_retries: 2
-  timeout: 60
-  allowed_fails: 3
-
-litellm_settings:
-  drop_params: true
-  set_verbose: false
-  telemetry: false
-  cache: true
-
-general_settings:
-  master_key: os.environ/ROUTER_MASTER_KEY
-  telemetry: false

@@ -104,7 +104,8 @@ class HeuristicTaskAnalyzer:
                         tags.append(t)
 
         # --- task type (first match wins) ---
-        task_type: TaskAnalysis.model_fields["task_type"].annotation  # type: ignore[attr-defined]
+        # iter 15: removed the dead `task_type: TaskAnalysis.model_fields[...]`
+        # line that was immediately overwritten below.
         task_type = "chat"  # default
         type_rules: list[tuple[str, str]] = [
             ("code", r"\b(code|debug|refactor|test|implement|function|class|compile|build)\b"),

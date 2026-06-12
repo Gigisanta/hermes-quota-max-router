@@ -32,12 +32,6 @@ DEFAULT_TIMEOUT_S = 15.0
 USER_AGENT = "hermes-quota-max-router/0.1 (auto-discovery)"
 
 
-def _parse(curated_path: Path | None = None) -> list[dict]:
-    """Re-export the parse helpers (kept here for testability)."""
-    from . import catalogs as c
-    return c._parse_static_curated  # type: ignore[attr-defined]
-
-
 class RemoteFeedProvider:
     """Fetches models from one or more catalog endpoints.
 
