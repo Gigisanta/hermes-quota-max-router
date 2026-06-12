@@ -2,13 +2,13 @@
 
 ## Supported Versions
 
-The router is currently in **0.1.x** (pre-1.0). Security fixes are made on
+The router is currently in **0.2.x** (pre-1.0). Security fixes are made on
 `main` and shipped as fast-follow patch releases.
 
 | Version | Supported          |
 |---------|--------------------|
-| 0.1.x   | :white_check_mark: |
-| < 0.1   | :x:                |
+| 0.2.x   | :white_check_mark: |
+| < 0.2   | :x:                |
 
 We strongly recommend running the latest commit on `main` in production. The
 project does not yet maintain stable LTS branches.

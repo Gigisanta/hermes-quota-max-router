@@ -2,9 +2,10 @@
 
 [![tests](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/tests.yml/badge.svg)](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/tests.yml)
 [![lint](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/lint.yml/badge.svg)](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/lint.yml)
-[![codecov](https://codecov.io/gh/Gigisanta/hermes-quota-max-router/branch/main/graph/badge.svg)](https://codecov.io/gh/Gigisanta/hermes-quota-max-router)
+[![coverage](https://img.shields.io/badge/coverage-82%25-brightgreen.svg)](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![release](https://img.shields.io/github/v/release/Gigisanta/hermes-quota-max-router)](https://github.com/Gigisanta/hermes-quota-max-router/releases)
 
 OpenAI-compatible HTTP proxy that routes every request to a verified free-tier
 LLM, falls back across free providers automatically, and only touches paid
@@ -15,7 +16,7 @@ model-provider plugin for Hermes Agent.
 ## 5-minute quickstart
 
 ```bash
-git clone <repo-url> hermes-quota-max-router
+git clone https://github.com/Gigisanta/hermes-quota-max-router.git
 cd hermes-quota-max-router
 
 python3 -m venv .venv
@@ -33,7 +34,7 @@ Sanity check, in another terminal:
 
 ```bash
 curl -s http://127.0.0.1:8088/v1/router/health
-# {"status":"ok","version":"0.1.0","live_mode":true,"models_count":546,...}
+# {"status":"ok","version":"0.2.0","live_mode":true,"models_count":546,...}
 ```
 
 First chat completion:
@@ -286,6 +287,16 @@ python -m pytest tests/ -q
 Coverage spans unit tests for the registry, orchestrator, quota manager,
 MoA engine, and security layer, plus end-to-end tests that hit the FastAPI
 server in stub mode.
+
+## Roadmap
+
+- **PyPI package** — `pip install hermes-quota-max-router` (the `pyproject.toml` is ready; publishing is the remaining step)
+- **Provider auto-verification loop** — periodically re-probe the 234 "confirmed free" models and demote the ones that started billing
+- **Multi-key rotation per provider** — spread free-tier quota across several API keys
+- **Streaming tool-calls** — tool deltas in the SSE path (blocking path already supports tools)
+- **OpenAI Responses API compatibility** — alongside the current Chat Completions surface
+
+Issues and PRs welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Where to go next
 

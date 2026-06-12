@@ -92,7 +92,7 @@ python scripts/run_router_live.py &
 
 # 2) Wait for it to come up
 curl http://127.0.0.1:8088/v1/router/health
-# {"status":"ok", "version":"0.1.0", "models_count": 546, "live_mode": true, ...}
+# {"status":"ok", "version":"0.2.0", "models_count": 546, "live_mode": true, ...}
 
 # 3) Run the end-to-end test (uses the Hermes profile + chat_completions transport)
 python scripts/e2e_hermes_provider.py
