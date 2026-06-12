@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -116,8 +117,16 @@ class ModelRegistry:
         if self.count() == 0 and seed_path is not None and seed_path.exists():
             self._load_seed(seed_path)
 
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path)
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        # `with sqlite3.connect(...)` alone only scopes the transaction —
+        # the connection itself must be closed or file descriptors leak.
+        conn = sqlite3.connect(self.db_path)
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         with self._connect() as conn:
