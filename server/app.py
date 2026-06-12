@@ -489,6 +489,18 @@ def build_app(
             count = registry.count()
             layer_info = {"curated_count": count, "discovered_count": 0,
                           "merged_count": count, "free_count": len(registry.free_first())}
+        # iter 15: include per-model health probe state so operators can
+        # see which free models are currently being skipped.
+        from core.health_probe import HealthState
+        probe = router_engine.health_probe
+        health_states = probe.all_states()
+        unhealthy = [
+            {"model_id": mid, "state": h.state.value,
+             "consecutive_failures": h.consecutive_failures,
+             "cooldown_until": h.cooldown_until}
+            for mid, h in health_states.items()
+            if h.state in (HealthState.UNHEALTHY, HealthState.HALF_OPEN)
+        ]
         return {
             "status": "ok",
             "version": "0.1.0",
@@ -496,6 +508,8 @@ def build_app(
             "live_mode": live,
             "active_sessions": session_manager.count(),
             "registry": layer_info,
+            "unhealthy_models": unhealthy,
+            "health_tracked_models": len(health_states),
         }
 
     @app.get("/v1/router/cost")

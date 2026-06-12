@@ -122,6 +122,7 @@ class RouterEngine:
         moa_engine: MoAEngine | None = None,
         live: bool = False,
         log_path: Path | None = None,
+        health_probe: "HealthProbe | None" = None,  # iter 15: see core.health_probe
     ) -> None:
         self.registry = registry
         self.quota = quota_manager
@@ -131,6 +132,12 @@ class RouterEngine:
         self.live = live
         self.log_path = log_path or LOG_PATH
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        # iter 15: circuit breaker. If caller doesn't pass one, use the
+        # process-wide default (lazy-init singleton).
+        if health_probe is None:
+            from .health_probe import get_default_probe
+            health_probe = get_default_probe()
+        self.health_probe = health_probe
 
     # --- main entrypoint ---
 
@@ -302,7 +309,21 @@ class RouterEngine:
         tools: list[dict] | None = None,
         tool_choice: str | dict | None = None,
     ) -> dict:
-        """Call LiteLLM (or stub). Returns {content, error, usage, tool_calls}."""
+        """Call LiteLLM (or stub). Returns {content, error, usage, tool_calls}.
+
+        iter 15: consults the HealthProbe before calling. If the model
+        is UNHEALTHY (in cooldown), returns a synthetic error immediately
+        so the caller can fall through to the fallback model. After the
+        call, records success/failure so the probe can update its state.
+        """
+        # iter 15: pre-flight circuit-breaker check.
+        if not self.health_probe.is_available(model):
+            return {
+                "content": "",
+                "error": f"model {model} unhealthy (circuit breaker open)",
+                "usage": {},
+                "tool_calls": None,
+            }
         if not self.live:
             data = _stub_response(model, messages)
             return {
@@ -327,7 +348,7 @@ class RouterEngine:
             # imported (server/app.py:51) yet never called; transient
             # errors cascaded straight to fallback. Now we attempt up to
             # 3 calls with exponential backoff before giving up.
-            from .security import with_retry as _with_retry
+            from .security import is_transient_error, with_retry as _with_retry
 
             def _do() -> dict[str, Any]:
                 resp = completion(**kwargs)
@@ -341,8 +362,17 @@ class RouterEngine:
                 }
 
             try:
-                return _with_retry(_do, max_attempts=3, base_delay_s=0.3, max_delay_s=4.0)
+                result = _with_retry(_do, max_attempts=3, base_delay_s=0.3, max_delay_s=4.0)
+                # iter 15: record success on the probe.
+                self.health_probe.record_success(model)
+                return result
             except Exception as e:  # noqa: BLE001
+                # iter 15: record failure on the probe, classified.
+                self.health_probe.record_failure(
+                    model,
+                    transient=is_transient_error(e),
+                    error=str(e),
+                )
                 return {
                     "content": "",
                     "error": str(e)[:200],
