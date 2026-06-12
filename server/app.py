@@ -46,6 +46,8 @@ from core.orchestrator import RuleBasedOrchestrator, LLMOrchestrator
 from core.moa_engine import MoAEngine
 from core.router_engine import RouterEngine
 from core.security import (
+    RateLimiter,
+    RedisTokenBucket,
     TokenBucket,
     get_master_key,
     require_master_key,
@@ -56,6 +58,7 @@ from core.security import (
 from server.dependencies import make_auth_and_rate_limit
 from server.lifecycle import is_quota_reset_disabled, make_quota_reset_loop
 from server.middlewares import make_security_headers_middleware
+from core.security import RateLimiter
 
 log = logging.getLogger(__name__)
 
@@ -248,10 +251,30 @@ def build_app(
     )
 
     # Phase 8: rate limiter. iter 15: configurable via env for tests +
-    # ops. Defaults match the original (60 burst, 1/s refill).
+    # ops. Defaults match the original (60 burst, 1/s refill). When
+    # ROUTER_REDIS_URL is set, use a Redis-backed bucket so multi-worker
+    # uvicorn shares the rate-limit state. Otherwise, in-process.
     _burst = float(os.environ.get("ROUTER_RATE_LIMIT_BURST", "60") or "60")
     _refill = float(os.environ.get("ROUTER_RATE_LIMIT_REFILL", "1") or "1")
-    rate_limiter = TokenBucket(capacity=_burst, refill_rate=_refill)
+    _redis_url = os.environ.get("ROUTER_REDIS_URL", "").strip()
+    if _redis_url:
+        try:
+            import redis as _redis  # type: ignore
+            _redis_client = _redis.Redis.from_url(_redis_url, decode_responses=True)
+            _redis_client.ping()
+            rate_limiter: RateLimiter = RedisTokenBucket(
+                capacity=_burst, refill_rate=_refill, redis_client=_redis_client,
+            )
+            log.info("Rate limiter: Redis-backed (multi-worker safe)")
+        except (ImportError, OSError, RuntimeError) as e:
+            log.warning(
+                "Rate limiter: ROUTER_REDIS_URL set but Redis unavailable (%s). "
+                "Falling back to in-process TokenBucket (NOT multi-worker safe).",
+                e,
+            )
+            rate_limiter = TokenBucket(capacity=_burst, refill_rate=_refill)
+    else:
+        rate_limiter = TokenBucket(capacity=_burst, refill_rate=_refill)
 
     # Simple in-memory metrics (Prometheus exposition format)
     # F7-fix: added router_fallback_total so silent primary→fallback swaps

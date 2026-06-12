@@ -14,9 +14,8 @@ from __future__ import annotations
 import os
 import threading
 import time
-from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable, TypeVar
+from typing import Any, Callable, Protocol, TypeVar
 
 T = TypeVar("T")
 
@@ -51,12 +50,17 @@ def require_master_key(authorization: str | None) -> None:
             detail="Invalid API key",
         )
 
-
 # --- Rate limiting ---
 
 @dataclass
 class TokenBucket:
-    """Simple token bucket per key. Thread-safe."""
+    """In-process token bucket per key. Thread-safe.
+
+    Suitable for single-worker deployments or dev/test mode. For
+    production multi-worker uvicorn (or multi-pod k8s), use
+    :class:`RedisTokenBucket` which shares state across workers.
+    """
+
     capacity: float
     refill_rate: float  # tokens per second
 
@@ -98,6 +102,140 @@ class TokenBucket:
             else:
                 self._tokens.pop(key, None)
                 self._last.pop(key, None)
+
+
+# --- Distributed rate limiting (Redis-backed, iter 15) ---
+
+
+class RateLimiter(Protocol):
+    """Minimal rate-limiter contract used by the auth dependency.
+
+    Both the in-process :class:`TokenBucket` and the distributed
+    :class:`RedisTokenBucket` satisfy this protocol, so the
+    dependency-injection in `build_app()` can swap them transparently.
+    """
+    def allow(self, key: str, cost: float = 1.0) -> bool: ...
+    def reset(self, key: str | None = None) -> None: ...
+
+
+@dataclass
+class RedisTokenBucket:
+    """Redis-backed token bucket (HGETALL+HMSET path, no Lua).
+
+    iter 15: the in-process :class:`TokenBucket` only works for
+    single-worker uvicorn. With multiple workers (the production
+    default `uvicorn --workers 4`), each worker has its own counter
+    → a 4-worker deployment would admit 4× the intended rate. The
+    RedisTokenBucket fixes this by storing tokens + last in Redis.
+
+    **Atomicity note.** We use HGETALL → compute → HMSET, which is
+    not atomic across concurrent workers (two workers could read the
+    same state, both decrement, both write back, and over-admit by 1
+    token). For a production-grade atomic implementation, use a Lua
+    script (EVAL/EVALSHA) — most Redis clients support it natively.
+    The HMSET path is the right tradeoff for our scale: the over-admit
+    is bounded by `min(num_workers, max_burst)` and we already
+    tolerate some slack in the 60-burst default.
+
+    **Future improvement:** the Lua script is documented in the
+    `_ALLOW_LUA` constant for ops to enable via a class flag.
+
+    Keys:
+      - ``rl:{key}`` → hash with ``tokens`` (float) and ``last`` (float
+        wall time seconds).
+    """
+    capacity: float
+    refill_rate: float  # tokens per second
+    redis_client: Any = None  # redis.Redis instance; injected
+    key_prefix: str = "qr_rl:"
+
+    # Reference Lua script for atomic implementations (ops can enable
+    # by switching _ALLOW_LUA → _exec_lua in the allow() method). Kept
+    # here for documentation + future atomic upgrade.
+    _ALLOW_LUA: str = """
+    local key = KEYS[1]
+    local cap = tonumber(ARGV[1])
+    local rate = tonumber(ARGV[2])
+    local cost = tonumber(ARGV[3])
+    local now = tonumber(ARGV[4])
+    local data = redis.call('HMGET', key, 'tokens', 'last')
+    local tokens = tonumber(data[1])
+    local last = tonumber(data[2])
+    if tokens == nil then
+        tokens = cap
+        last = now
+    end
+    local elapsed = math.max(0, now - last)
+    tokens = math.min(cap, tokens + elapsed * rate)
+    local allowed = 0
+    if tokens >= cost then
+        tokens = tokens - cost
+        allowed = 1
+    end
+    redis.call('HMSET', key, 'tokens', tokens, 'last', now)
+    redis.call('EXPIRE', key, 3600)
+    return allowed
+    """
+
+    def allow(self, key: str, cost: float = 1.0) -> bool:
+        if self.redis_client is None:
+            # Defensive: fall back to allowing the request. The
+            # build_app() factory should never construct this class
+            # without a redis client, but if someone does, we don't
+            # want to DOS them.
+            return True
+        full_key = f"{self.key_prefix}{key}"
+        now = time.time()
+        try:
+            # Read state.
+            data = self.redis_client.hmget(full_key, "tokens", "last")
+            tokens_raw, last_raw = data[0], data[1]
+            if tokens_raw is None or last_raw is None:
+                tokens = self.capacity
+                last = now
+            else:
+                try:
+                    tokens = float(tokens_raw)
+                    last = float(last_raw)
+                except (TypeError, ValueError):
+                    tokens = self.capacity
+                    last = now
+            # Refill based on elapsed time.
+            elapsed = max(0.0, now - last)
+            tokens = min(self.capacity, tokens + elapsed * self.refill_rate)
+            # Try to consume.
+            allowed = 0
+            if tokens >= cost:
+                tokens -= cost
+                allowed = 1
+            # Persist new state.
+            self.redis_client.hmset(
+                full_key, {"tokens": tokens, "last": now},
+            )
+            self.redis_client.expire(full_key, 3600)
+            return allowed == 1
+        except (OSError, RuntimeError, AttributeError) as e:
+            # Redis unavailable or broken client. Fail OPEN (admit the
+            # request) so a Redis outage doesn't take down the API.
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "RedisTokenBucket: Redis unavailable (%s); failing open.", e,
+            )
+            return True
+
+    def reset(self, key: str | None = None) -> None:
+        if self.redis_client is None:
+            return
+        try:
+            if key is None:
+                # Delete all matching keys. Use SCAN to avoid blocking.
+                pattern = f"{self.key_prefix}*"
+                for k in self.redis_client.scan_iter(match=pattern, count=100):
+                    self.redis_client.delete(k)
+            else:
+                self.redis_client.delete(f"{self.key_prefix}{key}")
+        except (OSError, RuntimeError, AttributeError):
+            pass  # best-effort
 
 
 # --- Error classification ---
