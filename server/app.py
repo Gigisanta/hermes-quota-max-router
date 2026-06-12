@@ -210,12 +210,16 @@ def build_app(
     rate_limiter = TokenBucket(capacity=60.0, refill_rate=1.0)
 
     # Simple in-memory metrics (Prometheus exposition format)
+    # F7-fix: added router_fallback_total so silent primary→fallback swaps
+    # are visible. Without this, users think they're on deepseek when they're
+    # actually on gemini-flash-lite.
     metrics = {
         "calls_per_model": defaultdict(int),
         "tokens_per_model": defaultdict(int),
         "errors_per_model": defaultdict(int),
         "latency_samples": [],  # list[float]
         "rate_limited_total": 0,
+        "fallback_total": 0,
     }
 
     # Phase 12: per-session context (multi-turn conversations)
@@ -350,6 +354,18 @@ def build_app(
         metrics["tokens_per_model"][result.model_used or "(none)"] += result.total_tokens
         if result.error:
             metrics["errors_per_model"][result.model_used or "(none)"] += 1
+        # F7-fix: track silent primary→fallback swaps explicitly. Operators
+        # need to see when their "deepseek-r1" budget is exhausted and
+        # requests are being silently rerouted to gemini-flash-lite.
+        if getattr(result, "fallback_used", False):
+            metrics["fallback_total"] += 1
+            _lg = logging.getLogger(__name__)
+            _lg.warning(
+                "router_fallback: chosen_model=%s actual_model=%s reason=%s",
+                (result.decision.models_to_use[0] if getattr(result.decision, "models_to_use", None) else "(unknown)"),
+                result.model_used or "(unknown)",
+                result.error or "(none)",
+            )
         metrics["latency_samples"].append(duration)
         if len(metrics["latency_samples"]) > 1000:
             metrics["latency_samples"] = metrics["latency_samples"][-1000:]
@@ -553,6 +569,8 @@ def build_app(
             lines.append(f"router_call_duration_seconds_p50 {p50:.4f}")
         if metrics["rate_limited_total"]:
             lines.append(f"router_rate_limited_total {metrics['rate_limited_total']}")
+        if metrics["fallback_total"]:
+            lines.append(f"router_fallback_total {metrics['fallback_total']}")
         return "\n".join(lines) + "\n"
 
     return app
