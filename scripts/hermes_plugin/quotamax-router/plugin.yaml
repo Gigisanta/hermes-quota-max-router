@@ -1,0 +1,5 @@
+name: quotamax-router
+kind: model-provider
+version: 0.1.0
+description: "QuotaMax Router — routes only to verified 100% free LLM models. Self-discovering, falls back across free providers automatically."
+author: Gio / HerMaat
