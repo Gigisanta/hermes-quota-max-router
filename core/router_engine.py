@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .model_registry import ModelRegistry
 from .moa_engine import MoAEngine, run_sync
@@ -56,6 +56,11 @@ class RouterCallResult:
     fallback_used: bool = False
     error: str | None = None
     analysis: TaskAnalysis | None = None
+    # When the model decides to call a tool, OpenAI-style tool_calls appear
+    # here. Each entry is a dict like:
+    #   {"id": "call_xxx", "type": "function",
+    #    "function": {"name": "...", "arguments": "{...json...}"}}
+    tool_calls: list[dict] | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -128,11 +133,16 @@ class RouterEngine:
         messages: list[dict],
         model: str | None = None,
         history: list[dict] | None = None,
+        tools: list[dict] | None = None,
+        tool_choice: str | dict | None = None,
     ) -> RouterCallResult:
         """Route + execute a chat completion.
 
         If `model` is None, the orchestrator decides.
         If `model` is provided, that model is used directly (no override).
+
+        `tools` and `tool_choice` are passed straight through to LiteLLM
+        (OpenAI-compatible function-calling).
         """
         started = time.monotonic()
         user_msg = next(
@@ -180,6 +190,7 @@ class RouterEngine:
 
         return self._execute_with_fallback(
             decision, analysis, chosen, fallback, messages, started,
+            tools=tools, tool_choice=tool_choice,
         )
 
     # --- execution paths ---
@@ -222,6 +233,8 @@ class RouterEngine:
         fallback: str | None,
         messages: list[dict],
         started: float,
+        tools: list[dict] | None = None,
+        tool_choice: str | dict | None = None,
     ) -> RouterCallResult:
         # Pre-flight quota check
         if self.quota.should_block(primary, decision.estimated_tokens):
@@ -242,12 +255,12 @@ class RouterEngine:
             fallback_used = False
 
         # Try primary
-        result = self._call_one(primary, messages)
+        result = self._call_one(primary, messages, tools=tools, tool_choice=tool_choice)
         if result["error"] and fallback and not self.quota.should_block(
             fallback, decision.estimated_tokens,
         ):
             log.warning("Primary %s failed (%s); using fallback %s", primary, result["error"], fallback)
-            result = self._call_one(fallback, messages)
+            result = self._call_one(fallback, messages, tools=tools, tool_choice=tool_choice)
             fallback_used = True
             model_used = fallback
         else:
@@ -269,31 +282,148 @@ class RouterEngine:
             fallback_used=fallback_used,
             error=result["error"],
             analysis=analysis,
+            tool_calls=result.get("tool_calls"),
         )
         self._log(rc)
         return rc
 
     # --- internals ---
 
-    def _call_one(self, model: str, messages: list[dict]) -> dict:
-        """Call LiteLLM (or stub). Returns {content, error, usage}."""
+    def _call_one(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        tool_choice: str | dict | None = None,
+    ) -> dict:
+        """Call LiteLLM (or stub). Returns {content, error, usage, tool_calls}."""
         if not self.live:
             data = _stub_response(model, messages)
             return {
                 "content": data["choices"][0]["message"]["content"],
                 "error": None,
                 "usage": data["usage"],
+                "tool_calls": None,
             }
         try:
             from litellm import completion
-            resp = completion(model=model, messages=messages, temperature=0.2)
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.2,
+            }
+            if tools:
+                kwargs["tools"] = tools
+            if tool_choice is not None:
+                kwargs["tool_choice"] = tool_choice
+            resp = completion(**kwargs)
+            message = resp["choices"][0]["message"] or {}
+            tool_calls = message.get("tool_calls") or None
             return {
-                "content": resp["choices"][0]["message"]["content"] or "",
+                "content": (message.get("content") or ""),
                 "error": None,
                 "usage": dict(resp.get("usage") or {}),
+                "tool_calls": tool_calls,
             }
         except Exception as e:  # noqa: BLE001
-            return {"content": "", "error": str(e)[:200], "usage": {}}
+            return {
+                "content": "",
+                "error": str(e)[:200],
+                "usage": {},
+                "tool_calls": None,
+            }
+
+    # --- streaming ---
+
+    def stream(
+        self,
+        messages: list[dict],
+        model: str | None = None,
+        tools: list[dict] | None = None,
+        tool_choice: str | dict | None = None,
+    ) -> Iterator[dict]:
+        """Yield OpenAI-style SSE delta chunks.
+
+        Each yielded dict is shaped like:
+          {"model": "...",
+           "delta": {"role": "assistant", "content": "..."},
+           "finish_reason": "stop" | None}
+
+        Routes the same way `completion()` does (orchestrator picks the
+        model when `model` is None or "auto") so the streaming path
+        doesn't bypass routing decisions. In stub mode, yields the full
+        content as a single delta. In live mode, wraps
+        `litellm.completion(stream=True)`.
+        """
+        # Route first so "auto" gets resolved to a concrete model.
+        started = time.monotonic()
+        user_msg = next(
+            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+            "",
+        )
+        analysis = self.analyzer.analyze(user_msg)
+        if model and model != "auto":
+            chosen = model
+        else:
+            decision = self.orchestrator.route(analysis, self.registry, self.quota)
+            chosen = decision.primary_model
+            if not chosen:
+                yield {
+                    "model": "unknown",
+                    "delta": {"role": "assistant", "content": "[no_model_available]"},
+                    "finish_reason": "stop",
+                }
+                return
+
+        if not self.live:
+            data = _stub_response(chosen, messages)
+            content = data["choices"][0]["message"]["content"]
+            yield {
+                "model": chosen,
+                "delta": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+            return
+
+        try:
+            from litellm import completion
+            kwargs: dict[str, Any] = {
+                "model": chosen,
+                "messages": messages,
+                "temperature": 0.2,
+                "stream": True,
+            }
+            if tools:
+                kwargs["tools"] = tools
+            if tool_choice is not None:
+                kwargs["tool_choice"] = tool_choice
+            for piece in completion(**kwargs):
+                # piece is a ModelResponseStream; .choices[0].delta has the chunk
+                try:
+                    delta = piece.choices[0].delta
+                    delta_dict: dict[str, Any] = {}
+                    if getattr(delta, "role", None):
+                        delta_dict["role"] = delta.role
+                    content_piece = getattr(delta, "content", None)
+                    if content_piece:
+                        delta_dict["content"] = content_piece
+                    if not delta_dict and not getattr(delta, "finish_reason", None):
+                        # Skip empty deltas (some providers emit them)
+                        continue
+                    yield {
+                        "model": chosen,
+                        "delta": delta_dict,
+                        "finish_reason": getattr(delta, "finish_reason", None),
+                    }
+                except (AttributeError, IndexError):
+                    # Unexpected shape; skip the piece.
+                    continue
+        except Exception as exc:  # noqa: BLE001
+            yield {
+                "model": chosen,
+                "delta": {"role": "assistant", "content": f"[stream error: {exc}]"},
+                "finish_reason": "stop",
+            }
 
     def _log(self, rc: RouterCallResult) -> None:
         line = json.dumps(rc.to_dict(), ensure_ascii=False)

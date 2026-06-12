@@ -19,6 +19,7 @@ Run:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -55,9 +56,23 @@ log = logging.getLogger(__name__)
 
 # --- OpenAI-compatible request/response schemas ---
 
+class ToolCallFunction(BaseModel):
+    name: str
+    arguments: str  # JSON-encoded string
+
+
+class ToolCall(BaseModel):
+    id: str
+    type: str = "function"
+    function: ToolCallFunction
+
+
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str | None = ""
+    name: str | None = None
+    tool_calls: list[ToolCall] | None = None
+    tool_call_id: str | None = None
 
 
 class ChatCompletionRequest(BaseModel):
@@ -65,6 +80,9 @@ class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage]
     temperature: float | None = 1.0
     stream: bool = False
+    # OpenAI-compatible function-calling / tool-calling
+    tools: list[dict] | None = None
+    tool_choice: str | dict | None = None
     # Hermes extension: force routing strategy (debug only)
     force_strategy: str | None = Field(default=None, exclude=True)
     # Hermes extension: optional session id for multi-turn context
@@ -75,6 +93,13 @@ class ChatCompletionChoice(BaseModel):
     index: int
     message: ChatMessage
     finish_reason: str = "stop"
+
+
+class ChatCompletionChoiceDelta(BaseModel):
+    """For streaming: each chunk carries a delta, not a full message."""
+    index: int
+    delta: dict
+    finish_reason: str | None = None
 
 
 class ChatCompletionUsage(BaseModel):
@@ -94,6 +119,15 @@ class ChatCompletionResponse(BaseModel):
     router_decision: dict | None = None
     router_error: str | None = None
     fallback_used: bool = False
+
+
+class ChatCompletionChunk(BaseModel):
+    """SSE chunk for streaming responses. Matches OpenAI's delta format."""
+    id: str
+    object: str = "chat.completion.chunk"
+    created: int
+    model: str
+    choices: list[ChatCompletionChoiceDelta]
 
 
 # --- App factory ---
@@ -259,30 +293,38 @@ def build_app(
 
     # --- endpoints ---
 
-    @app.post("/v1/chat/completions", response_model=ChatCompletionResponse,
+    @app.post("/v1/chat/completions",
               dependencies=[Depends(auth_and_rate_limit)])
-    def chat_completions(req: ChatCompletionRequest) -> ChatCompletionResponse:
-        if req.stream:
-            raise HTTPException(status_code=400, detail="Streaming not yet supported")
+    def chat_completions(req: ChatCompletionRequest, request: Request):
         if not req.messages:
             raise HTTPException(status_code=400, detail="messages must not be empty")
 
+        if req.stream:
+            return _stream_chat(req)
+
+        return _blocking_chat(req)
+
+    def _blocking_chat(req: ChatCompletionRequest) -> ChatCompletionResponse:
         started = time.monotonic()
-        msgs = [m.model_dump() for m in req.messages]
+        msgs = [m.model_dump(exclude_none=True) for m in req.messages]
 
         # Phase 12: attach to a session if provided
         sess = None
         if req.session_id:
             sess = session_manager.get_or_create(req.session_id)
             for m in req.messages[:-1]:  # everything except the last (current) turn
-                sess.append(m.role, m.content)
+                sess.append(m.role, m.content or "")
 
-        def _do_call() -> RouterEngine:  # type: ignore[type-arg]
+        from core.router_engine import RouterEngine, RouterCallResult
+        def _do_call() -> RouterCallResult:
             # Treat "auto" (or empty/None) as "let the orchestrator decide".
-            # The router_engine treats model=None as orchestrator-driven;
-            # any other string is passed through to LiteLLM as a specific model.
             chosen_model = req.model if (req.model and req.model != "auto") else None
-            return router_engine.completion(messages=msgs, model=chosen_model)
+            return router_engine.completion(
+                messages=msgs,
+                model=chosen_model,
+                tools=req.tools,
+                tool_choice=req.tool_choice,
+            )
 
         result = _do_call()
         duration = time.monotonic() - started
@@ -299,7 +341,7 @@ def build_app(
 
         # Phase 12: record this turn in the session
         if sess is not None:
-            sess.append("user", msgs[-1]["content"])
+            sess.append("user", msgs[-1].get("content") or "")
             sess.append("assistant", result.content,
                         model_used=result.model_used, tokens=result.total_tokens)
 
@@ -312,13 +354,32 @@ def build_app(
         if len(metrics["latency_samples"]) > 1000:
             metrics["latency_samples"] = metrics["latency_samples"][-1000:]
 
+        # Build the response message; include tool_calls if the model returned any.
+        message = ChatMessage(role="assistant", content=result.content)
+        tool_calls = result.tool_calls or None
+        if tool_calls:
+            message.tool_calls = [
+                ToolCall(
+                    id=tc.get("id", f"call_{i}"),
+                    type=tc.get("type", "function"),
+                    function=ToolCallFunction(
+                        name=tc.get("function", {}).get("name", ""),
+                        arguments=tc.get("function", {}).get("arguments", ""),
+                    ),
+                )
+                for i, tc in enumerate(tool_calls)
+            ]
+            if not result.content:
+                message.content = None
+
         return ChatCompletionResponse(
             id=f"chatcmpl-{int(time.time() * 1000)}",
             created=int(time.time()),
             model=result.model_used or "unknown",
             choices=[ChatCompletionChoice(
                 index=0,
-                message=ChatMessage(role="assistant", content=result.content),
+                message=message,
+                finish_reason="tool_calls" if tool_calls else "stop",
             )],
             usage=ChatCompletionUsage(
                 prompt_tokens=result.input_tokens,
@@ -328,7 +389,54 @@ def build_app(
             router_decision=result.decision.model_dump() if result.decision else None,
             router_error=result.error,
             fallback_used=result.fallback_used,
-        )
+        ).model_dump(exclude_none=True)
+
+    def _stream_chat(req: ChatCompletionRequest):
+        """SSE stream of ChatCompletionChunk deltas, OpenAI-compatible."""
+        from fastapi.responses import StreamingResponse
+        msgs = [m.model_dump(exclude_none=True) for m in req.messages]
+        chosen_model = req.model if (req.model and req.model != "auto") else None
+        chunk_id = f"chatcmpl-{int(time.time() * 1000)}"
+        created_ts = int(time.time())
+
+        def _gen():
+            try:
+                for piece in router_engine.stream(
+                    messages=msgs,
+                    model=chosen_model,
+                    tools=req.tools,
+                    tool_choice=req.tool_choice,
+                ):
+                    # piece is a dict with at least {delta, finish_reason}
+                    chunk = ChatCompletionChunk(
+                        id=chunk_id,
+                        created=created_ts,
+                        model=piece.get("model", "unknown"),
+                        choices=[ChatCompletionChoiceDelta(
+                            index=0,
+                            delta=piece.get("delta", {}),
+                            finish_reason=piece.get("finish_reason"),
+                        )],
+                    )
+                    yield f"data: {chunk.model_dump_json()}\n\n"
+                yield "data: [DONE]\n\n"
+            except Exception as exc:  # noqa: BLE001
+                # Surface the error to the client as the final chunk.
+                err_chunk = {
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": "unknown",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": f"\n\n[stream error: {exc}]"},
+                        "finish_reason": "stop",
+                    }],
+                }
+                yield f"data: {json.dumps(err_chunk)}\n\n"
+                yield "data: [DONE]\n\n"
+
+        return StreamingResponse(_gen(), media_type="text/event-stream")
 
     @app.get("/v1/models")
     def list_models() -> dict[str, Any]:
