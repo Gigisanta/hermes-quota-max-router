@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Hermes QuotaMax Router"
+abstract: >-
+  OpenAI-compatible proxy that routes every request to verified free-tier
+  LLM models, with automatic fallback, quota tracking, and a circuit breaker.
+authors:
+  - family-names: Santarelli
+    given-names: Giolivo
+    email: giolivosantarelli@gmail.com
+license: MIT
+repository-code: "https://github.com/Gigisanta/hermes-quota-max-router"
+url: "https://github.com/Gigisanta/hermes-quota-max-router"
+keywords:
+  - llm
+  - router
+  - openai-compatible
+  - free-tier
+  - litellm
+version: 0.2.0
+date-released: 2026-06-12

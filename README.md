@@ -1,5 +1,11 @@
 # Hermes QuotaMax Router
 
+[![tests](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/tests.yml/badge.svg)](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/tests.yml)
+[![lint](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/lint.yml/badge.svg)](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/lint.yml)
+[![codecov](https://codecov.io/gh/Gigisanta/hermes-quota-max-router/branch/main/graph/badge.svg)](https://codecov.io/gh/Gigisanta/hermes-quota-max-router)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+
 OpenAI-compatible HTTP proxy that routes every request to a verified free-tier
 LLM, falls back across free providers automatically, and only touches paid
 quotas when the free pool can't satisfy the task. 546 models in the registry
@@ -256,11 +262,25 @@ fakeredis in tests), and a JSONL append-only call log on disk.
    registry/models.json  (546 models, 234 free)
 ```
 
+## Docker
+
+```bash
+cp .env.example .env   # set at least one provider key
+docker compose up --build
+# router on http://127.0.0.1:8080 + Redis-backed quota state
+```
+
+## Examples
+
+Runnable examples (curl, httpx, SSE streaming, openai SDK, quota status)
+live in [`examples/`](examples/). Each one works against a local server
+started with `python -m server.app`.
+
 ## Testing
 
 ```bash
 python -m pytest tests/ -q
-# 232 passed in ~27s
+# 272 passed in ~20s
 ```
 
 Coverage spans unit tests for the registry, orchestrator, quota manager,
@@ -274,3 +294,10 @@ server in stub mode.
 - [`docs/PROVIDERS.md`](docs/PROVIDERS.md) — what each provider gives you, free vs. paid
 - [`docs/HERMES_INTEGRATION.md`](docs/HERMES_INTEGRATION.md) — deeper plugin + sub-agent reference
 - [`CHANGELOG.md`](CHANGELOG.md) — release notes
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — dev setup, style, PR checklist
+- [`SECURITY.md`](SECURITY.md) — how to report vulnerabilities
+- [`CITATION.cff`](CITATION.cff) — cite this project
+
+## License
+
+[MIT](LICENSE) © Giolivo Santarelli

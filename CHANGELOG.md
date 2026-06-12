@@ -22,6 +22,28 @@ and `docs/PROVIDERS.md` for the live registry snapshot.
 
 ---
 
+## [0.2.0] — 2026-06-12 — OSS readiness
+
+### Added
+- `Dockerfile` (non-root, healthcheck, JSON logs) + `router` service in `docker-compose.yml`.
+- `examples/` — 5 runnable examples (curl, httpx, SSE streaming, openai SDK, quota status),
+  all verified against a live stub server.
+- `Makefile` — `install / test / test-cov / lint / format / type-check / serve` targets.
+- `.pre-commit-config.yaml` — ruff + ruff-format + hygiene hooks, pytest smoke on push.
+- `requirements-dev.txt` — test/lint deps split out of runtime `requirements.txt`.
+- `.github/dependabot.yml` — weekly grouped pip + github-actions updates.
+- `CITATION.cff`, `.editorconfig`, `.dockerignore`, README badges.
+- `ROUTER_HTTP_HOST` env var (loopback default; `0.0.0.0` inside Docker).
+
+### Changed
+- Codebase formatted with `ruff format`; all `ruff check` violations fixed
+  (real bugs included: `HealthProbe` and `io` were referenced without imports).
+- `HealthState` now derives from `enum.StrEnum`.
+- Version is single-sourced from `core.__version__` (health endpoint + FastAPI metadata).
+- Tests: 272 passing.
+
+---
+
 ## [Unreleased] — iter 15 OSS prep
 
 ### Added

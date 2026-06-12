@@ -307,7 +307,9 @@ def build_app(
     # Phase 15: budget monitor (warn/block thresholds)
     budget_monitor = BudgetMonitor(warn_pct=0.80, block_pct=1.00)
 
-    app = FastAPI(title="Hermes QuotaMax Router", version="0.1.0")
+    from core import __version__
+
+    app = FastAPI(title="Hermes QuotaMax Router", version=__version__)
     master_key = os.environ.get("ROUTER_MASTER_KEY", "")
 
     # iter 15: extracted quota-reset background loop (lifecycle.py)
@@ -571,7 +573,7 @@ def build_app(
         ]
         return {
             "status": "ok",
-            "version": "0.1.0",
+            "version": app.version,
             "models_count": count,
             "live_mode": live,
             "active_sessions": session_manager.count(),

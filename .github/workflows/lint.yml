@@ -20,8 +20,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install ruff
-      - run: ruff check core/ server/ scripts/ dashboard/ tests/
-      - run: ruff format --check core/ server/ scripts/ dashboard/ tests/
+      - run: ruff check core/ server/ scripts/ dashboard/ tests/ examples/
+      - run: ruff format --check core/ server/ scripts/ dashboard/ tests/ examples/
 
   gitleaks:
     name: gitleaks (secret scan)

@@ -33,7 +33,7 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Ruff lint
-        run: ruff check core/ server/ scripts/ dashboard/ tests/
+        run: ruff check core/ server/ scripts/ dashboard/ tests/ examples/
 
       - name: mypy type check
         run: mypy --ignore-missing-imports --no-strict-optional core/ server/

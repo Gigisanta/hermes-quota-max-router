@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-quota-max-router"
-version = "0.1.0"
+version = "0.2.0"
 description = "OpenAI-compatible router that maximizes use of free LLM tiers, preserves paid-plan quotas, and auto-discovers new free models."
 readme = "README.md"
 license = {file = "LICENSE"}
