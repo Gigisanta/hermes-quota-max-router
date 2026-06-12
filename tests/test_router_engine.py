@@ -230,3 +230,28 @@ def test_router_call_result_to_dict_has_required_fields() -> None:
     assert d["decision_strategy"] == "direct"
     assert d["preserve_paid_quota"] is True
     assert "timestamp" in d
+
+
+def test_log_survives_non_json_native_tool_calls(tmp_path: Path) -> None:
+    """Regression: in live mode litellm returns ChatCompletionMessageToolCall
+    objects (not dicts) inside tool_calls. json.dumps without default= raised
+    TypeError inside _log and the whole request 500'd."""
+    from core.model_registry import ModelRegistry
+    from core.quota_manager import QuotaManager
+    from core.schemas import RoutingDecision
+
+    class FakeToolCall:  # mimics a pydantic object, not JSON-native
+        def model_dump(self) -> dict:
+            return {"id": "call_1", "type": "function"}
+
+    reg = ModelRegistry(db_path=tmp_path / "reg.sqlite")
+    engine = RouterEngine(reg, QuotaManager(), log_path=tmp_path / "calls.jsonl")
+    rc = RouterCallResult(
+        decision=RoutingDecision(chosen_strategy="direct", primary_model="x/y", reasoning="r"),
+        model_used="x/y",
+        content="",
+        tool_calls=[FakeToolCall()],  # type: ignore[list-item]
+    )
+    engine._log(rc)  # must not raise
+    logged = (tmp_path / "calls.jsonl").read_text()
+    assert "tool_calls" in logged

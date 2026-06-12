@@ -374,6 +374,12 @@ class RouterEngine:
                 resp = completion(**kwargs)
                 message = resp["choices"][0]["message"] or {}
                 tool_calls = message.get("tool_calls") or None
+                if tool_calls:
+                    # litellm returns ChatCompletionMessageToolCall objects,
+                    # not dicts — normalize so logging/serialization is safe.
+                    tool_calls = [
+                        tc.model_dump() if hasattr(tc, "model_dump") else dict(tc) for tc in tool_calls
+                    ]
                 return {
                     "content": (message.get("content") or ""),
                     "error": None,
@@ -502,9 +508,14 @@ class RouterEngine:
             }
 
     def _log(self, rc: RouterCallResult) -> None:
-        line = json.dumps(rc.to_dict(), ensure_ascii=False)
-        with open(self.log_path, "a") as f:
-            f.write(line + "\n")
+        # The audit log is a side channel — it must never break the request.
+        # default=str covers any non-JSON-native object that slips through.
+        try:
+            line = json.dumps(rc.to_dict(), ensure_ascii=False, default=str)
+            with open(self.log_path, "a") as f:
+                f.write(line + "\n")
+        except OSError as exc:
+            log.warning("router call log write failed: %s", exc)
 
 
 if __name__ == "__main__":

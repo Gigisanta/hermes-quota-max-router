@@ -13,6 +13,12 @@ quotas when the free pool can't satisfy the task. 546 models in the registry
 (234 confirmed free), one FastAPI server, one Gradio dashboard, one
 model-provider plugin for Hermes Agent.
 
+**What "confirmed free" means today:** the 4 curated models have been
+verified with real API calls; the rest are flagged free from provider
+catalog metadata (price `$0.00` on OpenRouter, ungated + hosted inference
+on Hugging Face). A continuous re-verification loop is on the
+[roadmap](#roadmap) — models that start billing get demoted automatically.
+
 ## 5-minute quickstart
 
 ```bash
