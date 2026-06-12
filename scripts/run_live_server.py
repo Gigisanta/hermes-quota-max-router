@@ -1,6 +1,8 @@
 import os, sys
 sys.path.insert(0, '/Users/prueba/workspaces/hermes-quota-max-router')
-os.environ['GEMINI_API_KEY'] = '__REDACTED_GEMINI_KEY__'
+# GEMINI_API_KEY must be provided via the environment or .env (gitignored).
+# No key is hardcoded in this script.
+os.environ.setdefault('GEMINI_API_KEY', '${GEMINI_API_KEY}')
 # Force live mode explicitly
 os.environ['ROUTER_LIVE'] = '1'
 import uvicorn
