@@ -33,10 +33,10 @@ git clone https://github.com/Gigisanta/hermes-quota-max-router.git
 cd hermes-quota-max-router
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -r requirements.txt -r requirements-dev.txt
+pre-commit install                # optional but recommended
 # Validate that everything works:
-pip install -r requirements.txt   # mirror the [project.optional-dependencies.dev] block
-pytest tests/ -q
+pytest tests/ -q                  # or: make test
 ```
 
 The first test run takes ~30s and exercises the full suite (currently 240
