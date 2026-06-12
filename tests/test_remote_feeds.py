@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from core.catalogs import (
@@ -105,12 +106,16 @@ def test_static_curated_returns_models_list() -> None:
 def test_remote_provider_aggregates_multiple_sources() -> None:
     """With all sources failing except curated, the curated list wins."""
     with patch("core.remote_feeds.httpx.Client") as MockClient:
-        # First 2 calls (openrouter + HF) raise; 3rd is the curated fallback
+        # First 2 calls (openrouter + HF) raise a real network-class
+        # exception; 3rd is the curated fallback. iter 15: tightened
+        # the production code to catch specific exception classes, so
+        # the test must use a real one (httpx.ConnectError, an
+        # OSError subclass) rather than a bare Exception.
         mock_instance = MagicMock()
         mock_instance.__enter__.return_value = mock_instance
         mock_instance.get.side_effect = [
-            Exception("network down"),
-            Exception("network down"),
+            httpx.ConnectError("network down"),
+            httpx.ConnectError("network down"),
         ]
         MockClient.return_value = mock_instance
         provider = RemoteFeedProvider(timeout_s=1.0)
@@ -127,7 +132,8 @@ def test_remote_provider_raises_when_all_fail() -> None:
     with patch("core.remote_feeds.httpx.Client") as MockClient:
         mock_instance = MagicMock()
         mock_instance.__enter__.return_value = mock_instance
-        mock_instance.get.side_effect = Exception("network down")
+        # See note above — use a real OSError subclass.
+        mock_instance.get.side_effect = httpx.ConnectError("network down")
         MockClient.return_value = mock_instance
         provider = RemoteFeedProvider(timeout_s=1.0)
         provider.curated_path = Path("/nonexistent/path.json")

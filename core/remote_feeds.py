@@ -68,7 +68,12 @@ class RemoteFeedProvider:
                     out.append(e)
                     added += 1
                 log.info("catalog %s: %d models", cat.name, added)
-            except Exception as e:  # noqa: BLE001
+            except (httpx.HTTPError, OSError, ValueError, KeyError) as e:
+                # iter 15: narrowed from `except Exception`. We expect:
+                #   - httpx.HTTPError for any HTTP failure (network, 4xx, 5xx, timeout)
+                #   - OSError for low-level network failures
+                #   - ValueError / KeyError for malformed JSON
+                # Anything else (e.g. RuntimeError) is a real bug and surfaces.
                 msg = f"{cat.name}: {type(e).__name__}: {e}"
                 errors.append(msg)
                 log.warning("catalog %s failed: %s", cat.name, e)

@@ -226,7 +226,11 @@ class RouterEngine:
                 duration_s=time.monotonic() - started,
                 analysis=analysis,
             )
-        except Exception as e:  # noqa: BLE001
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
+            # iter 15: narrowed from `except Exception`. MoA execution
+            # can fail with these (orchestration errors, bad data, etc).
+            # Other exceptions (e.g. KeyboardInterrupt, SystemExit) bubble
+            # up so the operator can actually kill the process.
             rc = RouterCallResult(
                 decision=decision,
                 model_used=",".join(decision.models_to_use),

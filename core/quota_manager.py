@@ -71,13 +71,20 @@ class QuotaManager:
             return
         try:
             import redis  # type: ignore
+            import redis.exceptions as _redis_exc  # type: ignore
             url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
             client = cast(QuotaStore, redis.Redis.from_url(url, decode_responses=True))
             client.ping()  # fast fail-fast check
             self._r = client
             log.info("QuotaManager: connected to Redis at %s", url)
-        except Exception as e:  # noqa: BLE001
-            # Fall back to fakeredis so the system runs without infra.
+        except (ImportError, OSError, _redis_exc.RedisError) as e:
+            # iter 15: narrowed from `except Exception`. We expect:
+            #   - ImportError if the redis package isn't installed
+            #   - OSError for low-level network failures (DNS, refused)
+            #   - redis.exceptions.RedisError for client-side errors
+            #     (connection, timeout, auth, response)
+            # Anything else (TypeError, KeyError, …) is a real bug and
+            # should surface.
             import fakeredis  # type: ignore
             self._r = cast(QuotaStore, fakeredis.FakeRedis(decode_responses=True))
             log.warning(

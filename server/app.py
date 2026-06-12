@@ -211,7 +211,7 @@ def build_app(
     #   "moa"   → RuleBasedOrchestrator + MoAEngine (fan-out + synthesize)
     # Live calls only happen if the brain model key is present in env; otherwise
     # the engine still routes and falls back to direct execution.
-    orchestrator_mode = os.environ.get("ROUTER_ORCHESTRATOR_MODE", "rule").strip().lower()
+    orchestrator_mode = os.environ.get("ROUTER_ORCHESTRATOR_MODE", "moa").strip().lower()
     brain_model = os.environ.get("ROUTER_BRAIN_MODEL", "gemini/gemini-2.5-flash").strip()
     synth_model = os.environ.get("ROUTER_SYNTH_MODEL", "gemini/gemini-2.5-flash").strip()
 
@@ -221,12 +221,23 @@ def build_app(
             live=live,
         )
         active_moa: MoAEngine | None = None
-    elif orchestrator_mode == "moa":
-        active_orchestrator = RuleBasedOrchestrator()
-        active_moa = MoAEngine(registry, quota, synthesizer_model=synth_model)
-    else:
+    elif orchestrator_mode == "rule":
+        # iter 15: explicit "rule" is the deterministic, no-network default.
+        # Use this for tests and for the "I trust my own analysis" mode.
         active_orchestrator = RuleBasedOrchestrator()
         active_moa = None
+    else:
+        # iter 15: ANY OTHER VALUE of ROUTER_ORCHESTRATOR_MODE defaults to
+        # the "moa" mode. The previous code treated the default as "rule",
+        # making the MoA branch in RuleBasedOrchestrator.route() (lines
+        # 230-252) unreachable without an env var flip. MoA is the
+        # product's central promise ("auto routing inteligente de
+        # potencia por tarea para modelos gratis de multiples proveedores
+        # inteligente") — it should be the default, with opt-out via
+        # ROUTER_ORCHESTRATOR_MODE=rule.
+        active_orchestrator = RuleBasedOrchestrator()
+        active_moa = MoAEngine(registry, quota, synthesizer_model=synth_model)
+        log.info("MOA engine enabled by default (set ROUTER_ORCHESTRATOR_MODE=rule to disable)")
 
     router_engine = RouterEngine(
         registry, quota,

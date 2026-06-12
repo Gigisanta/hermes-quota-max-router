@@ -190,9 +190,15 @@ class MoAEngine:
             # iter 15: same as above — non-blocking quota update.
             try:
                 await asyncio.to_thread(self.quota.consume, self.synthesizer_model, synth_tokens)
-            except Exception as e:  # noqa: BLE001
+            except (OSError, RuntimeError) as e:
+                # iter 15: narrowed from `except Exception`. Quota store
+                # failure modes are OS-level (Redis down) or runtime
+                # (state corruption). Other exceptions (e.g. TypeError
+                # from a bug) bubble up.
                 log.warning("moa quota.consume failed for synthesizer %s: %s", self.synthesizer_model, e)
-        except Exception as e:  # noqa: BLE001
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
+            # iter 15: narrowed. Synthesis failure is recoverable by
+            # falling through to "best individual response" below.
             synth = (
                 "[synthesis failed: " + str(e)[:200] + "]\n\n"
                 "Best individual response:\n\n" + next(iter(per_model.values()))
