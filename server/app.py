@@ -143,6 +143,7 @@ def build_app(
     quota=None,
     live: bool = False,
     use_layered: bool = True,
+    health_probe=None,
 ) -> FastAPI:
     """Build the FastAPI app.
 
@@ -153,6 +154,10 @@ def build_app(
     `live` defaults to False (stubs) to keep tests deterministic even
     when developer shells contain real API keys. Set ROUTER_LIVE=1 or
     pass live=True to force real provider calls.
+
+    `health_probe` defaults to the process-wide singleton from
+    `core.health_probe.get_default_probe()`. Pass an explicit instance
+    to inject state in tests.
 
     Security: the server REFUSES TO START if `ROUTER_MASTER_KEY` is unset
     and `ROUTER_ALLOW_INSECURE_NO_AUTH` is not explicitly set to `1`. This
@@ -228,10 +233,14 @@ def build_app(
         HeuristicTaskAnalyzer(), active_orchestrator,
         moa_engine=active_moa,
         live=live,
+        health_probe=health_probe,  # iter 15
     )
 
-    # Phase 8: rate limiter (60 burst, 1/s refill per client)
-    rate_limiter = TokenBucket(capacity=60.0, refill_rate=1.0)
+    # Phase 8: rate limiter. iter 15: configurable via env for tests +
+    # ops. Defaults match the original (60 burst, 1/s refill).
+    _burst = float(os.environ.get("ROUTER_RATE_LIMIT_BURST", "60") or "60")
+    _refill = float(os.environ.get("ROUTER_RATE_LIMIT_REFILL", "1") or "1")
+    rate_limiter = TokenBucket(capacity=_burst, refill_rate=_refill)
 
     # Simple in-memory metrics (Prometheus exposition format)
     # F7-fix: added router_fallback_total so silent primary→fallback swaps
