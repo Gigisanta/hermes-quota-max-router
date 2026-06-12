@@ -36,7 +36,7 @@ from typing import Any
 from .health_probe import HealthProbe, get_default_probe
 from .moa_engine import MoAEngine, run_sync
 from .model_registry import ModelRegistry
-from .orchestrator import RuleBasedOrchestrator
+from .orchestrator import Orchestrator, RuleBasedOrchestrator
 from .quota_manager import QuotaManager
 from .schemas import RoutingDecision, TaskAnalysis
 from .task_analyzer import HeuristicTaskAnalyzer
@@ -124,7 +124,7 @@ class RouterEngine:
         registry: ModelRegistry,
         quota_manager: QuotaManager,
         analyzer: HeuristicTaskAnalyzer | None = None,
-        orchestrator: RuleBasedOrchestrator | None = None,
+        orchestrator: Orchestrator | None = None,
         moa_engine: MoAEngine | None = None,
         live: bool = False,
         log_path: Path | None = None,

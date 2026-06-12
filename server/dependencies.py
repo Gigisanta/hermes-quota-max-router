@@ -23,13 +23,13 @@ from collections.abc import Callable
 
 from fastapi import HTTPException, Request
 
-from core.security import TokenBucket
+from core.security import RateLimiter
 
 
 def make_auth_and_rate_limit(
     *,
     master_key: str,
-    rate_limiter: TokenBucket,
+    rate_limiter: RateLimiter,
     on_rate_limited: Callable[[], None] | None = None,
 ) -> Callable[[Request], str]:
     """Build a FastAPI dependency that authenticates + rate-limits.
@@ -39,7 +39,7 @@ def make_auth_and_rate_limit(
             empty string disables auth (the iter 15 hardening in
             ``build_app()`` already refuses to start the server in that
             state unless the operator opts in).
-        rate_limiter: A ``TokenBucket`` (or compatible) used to enforce
+        rate_limiter: Any ``RateLimiter`` implementation used to enforce
             per-IP request rate.
         on_rate_limited: Optional callback invoked when a request is
             rate-limited (e.g. to bump a Prometheus counter).

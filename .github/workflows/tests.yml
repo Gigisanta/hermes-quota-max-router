@@ -37,7 +37,6 @@ jobs:
 
       - name: mypy type check
         run: mypy --ignore-missing-imports --no-strict-optional core/ server/
-        continue-on-error: true
 
       - name: Run tests with coverage
         env:

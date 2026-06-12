@@ -137,8 +137,8 @@ class HeuristicTaskAnalyzer:
 
         # --- language ---
         language = "en"
-        for pat, code in LANG_PATTERNS:
-            if pat.search(text):
+        for lang_pat, code in LANG_PATTERNS:
+            if lang_pat.search(text):
                 language = code
                 break
         if re.search(r"(?i)\b(in english|responde en inglés)\b", text):

@@ -289,7 +289,7 @@ def build_app(
     # F7-fix: added router_fallback_total so silent primary→fallback swaps
     # are visible. Without this, users think they're on deepseek when they're
     # actually on gemini-flash-lite.
-    metrics = {
+    metrics: dict[str, Any] = {
         "calls_per_model": defaultdict(int),
         "tokens_per_model": defaultdict(int),
         "errors_per_model": defaultdict(int),
@@ -353,7 +353,7 @@ def build_app(
 
         return _blocking_chat(req)
 
-    def _blocking_chat(req: ChatCompletionRequest) -> ChatCompletionResponse:
+    def _blocking_chat(req: ChatCompletionRequest) -> dict[str, Any]:
         started = time.monotonic()
         msgs = [m.model_dump(exclude_none=True) for m in req.messages]
 

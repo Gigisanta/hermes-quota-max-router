@@ -258,6 +258,8 @@ class RedisTokenBucket:
 # triggering a retry. We now use the actual litellm exception classes
 # (with safe fallbacks for tests / minimal installs).
 
+_API_ERROR_TYPE: type[Exception] | None
+
 try:
     import litellm.exceptions as _litellm_exceptions
 
