@@ -1,20 +1,51 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+.eggs/
+
+# Virtualenvs
 .venv/
 venv/
-.env
-data/*.db
-data/*.sqlite
-registry/data/*.sqlite
-registry/data/*.db
-logs/*.log
-logs/*.jsonl
-.DS_Store
+env/
+ENV/
+
+# Test / coverage
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
-registry/vector_db/storage/
-*.egg-info/
-dist/
-build/
-/tmp/
+coverage.xml
+.tox/
+.cache
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Build / runtime artifacts
+logs/*.jsonl
+!logs/.gitkeep
+*.log
+
+# Local overrides
+.omh/state/*.json
+!*.example
