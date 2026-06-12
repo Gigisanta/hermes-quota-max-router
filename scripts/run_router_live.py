@@ -13,11 +13,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-# Live Gemini key (rotated by user; safe in local-scope script, never logged).
-os.environ.setdefault(
-    "GEMINI_API_KEY",
-    "__REDACTED_GEMINI_KEY__",
-)
+# Live Gemini key. Reads GEMINI_API_KEY from the environment (see .env.example);
+# no key is committed to the repo. Required to enable live LLM calls via the
+# real provider. Refuses to start if the key is missing in live mode.
+os.environ.setdefault("GEMINI_API_KEY", "${GEMINI_API_KEY}")
 # Force live mode.
 os.environ["ROUTER_LIVE"] = "1"
 # Match the plugin default port.
