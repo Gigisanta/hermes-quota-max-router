@@ -1,0 +1,57 @@
+name: Bug Report
+description: Report something that is broken or behaves incorrectly.
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill out the template
+        below so we can reproduce and fix it quickly.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear, concise description of the bug.
+      placeholder: When I call /v1/chat/completions with model=auto, the router hangs.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, code, or curl invocations that trigger the bug.
+      placeholder: |
+        1. pip install -e .
+        2. cp .env.example .env
+        3. python -m server.app
+        4. curl -X POST http://127.0.0.1:8080/v1/chat/completions -d '...'
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        Output of:
+          - python --version
+          - pip freeze | grep -E "(litellm|fastapi|hermes)"
+          - uname -a
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Paste the last 50 lines from the server output. Wrap in ``` for code formatting.
+        If the issue involves a specific model, include the model name and provider.
+    validations:
+      required: false

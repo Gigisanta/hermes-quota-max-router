@@ -1,0 +1,57 @@
+name: tests
+
+on:
+  push:
+    branches: [main, v1-oss-prep]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff mypy
+
+      - name: Ruff lint
+        run: ruff check core/ server/ scripts/ dashboard/ tests/
+
+      - name: mypy type check
+        run: mypy --ignore-missing-imports --no-strict-optional core/ server/
+        continue-on-error: true
+
+      - name: Run tests with coverage
+        env:
+          # CI mode: use fakeredis (Redis is optional in HQMR)
+          QUOTAMAX_FAKEREDIS: "1"
+          ROUTER_LOG_LEVEL: WARNING
+        run: |
+          pytest tests/ --cov=core --cov=server --cov=dashboard --cov-report=xml --cov-report=term-missing -q
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
+        continue-on-error: true

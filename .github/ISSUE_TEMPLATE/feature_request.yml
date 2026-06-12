@@ -1,0 +1,54 @@
+name: Feature Request
+description: Suggest a new model provider, routing strategy, or feature.
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please search existing issues to avoid duplicates. Use
+        the `Question` template if you just need help.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: |
+        A clear description of the user pain. What can you NOT do today that
+        you wish you could?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        How would you like this to work? Code, config snippets, or curl examples help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        What other approaches did you consider? Why is this one better?
+    validations:
+      required: false
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: How big is this change?
+      options:
+        - Small (config-only, no code)
+        - Medium (new module or endpoint, backwards compatible)
+        - Large (breaking change to API or schema)
+    validations:
+      required: true
+  - type: textarea
+    id: contribution
+    attributes:
+      label: Willing to submit a PR?
+      description: |
+        Even a draft PR helps. Mark "Yes", "No", or "Need help getting started".
+    validations:
+      required: false

@@ -1,0 +1,22 @@
+name: Question
+description: Ask how to do something with QuotaMax Router.
+title: "[question] "
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you want to know?
+      description: |
+        Be as specific as possible. Include the model, the endpoint, the
+        expected output, and what you got.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: |
+        What are you trying to accomplish? What's your setup? (local dev, Docker, Hermes plugin, etc.)
+    validations:
+      required: false
