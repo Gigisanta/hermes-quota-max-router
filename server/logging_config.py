@@ -93,7 +93,11 @@ class JsonFormatter(logging.Formatter):
             payload["exc"] = self.formatException(record.exc_info)
         if record.stack_info:
             payload["stack"] = record.stack_info
-        return json.dumps(payload, ensure_ascii=False)
+        # JSONL consumers rely on one physical line per event.  Escaping all
+        # non-ASCII characters also escapes Unicode line separators (NEL,
+        # U+2028, U+2029), which ``ensure_ascii=False`` would emit literally
+        # and allow to split a record across lines.
+        return json.dumps(payload, ensure_ascii=True)
 
 
 def configure_json_logging(level: str = "INFO") -> None:

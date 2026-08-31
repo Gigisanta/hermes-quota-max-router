@@ -92,7 +92,9 @@ ignore = [
 "scripts/hermes_plugin/quotamax-router/__init__.py" = ["N999"]
 
 [tool.mypy]
-python_version = "3.11"
+# Let mypy target the interpreter that runs it.  CI checks both supported
+# Python versions, and a fixed 3.11 target cannot parse stubs that use
+# Python 3.12 syntax (for example, NumPy 2.5+ on the 3.12 job).
 warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
