@@ -1,3 +1,8 @@
+<!-- maatwork-brand:maatwork-mw-20260901 -->
+<p align="center"><img src="docs/brand/hermes-quota-max-router-cover.png" alt="hermes-quota-max-router · MaatWork" width="1200"></p>
+
+> internal platform de MaatWork
+
 # Hermes QuotaMax Router
 
 [![tests](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/tests.yml/badge.svg)](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/tests.yml)
