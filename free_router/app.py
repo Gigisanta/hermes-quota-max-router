@@ -204,10 +204,7 @@ def build_app(
 
     @app.get("/health")
     def health() -> dict:
-        try:
-            redis_ok = bool(quota.client.ping())
-        except redis.RedisError:
-            redis_ok = False
+        redis_ok = quota.healthy()
         return {
             "status": "ok" if redis_ok else "degraded",
             "version": __version__,

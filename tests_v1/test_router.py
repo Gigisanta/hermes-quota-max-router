@@ -69,6 +69,41 @@ def _app(catalog: Path, quota: QuotaStore, tmp_path: Path, provider=None):
     )
 
 
+def test_redis_without_durable_quota_ledger_fails_closed(catalog, quota, monkeypatch):
+    quota.require_durable = True
+    settings = {
+        "appendonly": "yes",
+        "appendfsync": "always",
+        "maxmemory-policy": "noeviction",
+    }
+    monkeypatch.setattr(quota.client, "config_get", lambda key: {key: settings[key]})
+    monkeypatch.setattr(
+        quota.client,
+        "info",
+        lambda section: {"aof_enabled": 1, "aof_last_write_status": "ok"},
+    )
+    spec = load_models(catalog)[0][0]
+    assert quota.healthy()
+    assert quota.reserve(spec, "journal", 100, 100).keys
+
+    settings["appendonly"] = "no"
+    assert not quota.healthy()
+    with pytest.raises(RuntimeError, match="quota_store_unavailable"):
+        quota.reserve(spec, "journal", 100, 100)
+
+    settings["appendonly"] = "yes"
+    original_eval = quota.client.eval
+
+    def loses_durability(*args):
+        result = original_eval(*args)
+        settings["appendonly"] = "no"
+        return result
+
+    monkeypatch.setattr(quota.client, "eval", loses_durability)
+    with pytest.raises(RuntimeError, match="quota_store_unavailable"):
+        quota.reserve(spec, "journal", 100, 100)
+
+
 def test_real_completion_and_distinct_reviewer(catalog, quota, tmp_path, monkeypatch):
     monkeypatch.setenv("ROUTER_TOKEN_JOURNAL", "journal-token")
     fake = FakeProvider()

@@ -46,10 +46,7 @@ def main() -> None:
         result = asyncio.run(run_audit())
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
-    try:
-        redis_ok = bool(client.ping())
-    except redis.RedisError:
-        redis_ok = False
+    redis_ok = quota.healthy()
     try:
         peak = json.loads(
             Path(os.getenv("ROUTER_DAILY_PEAK_FILE", "var/daily-peak.json")).read_text()

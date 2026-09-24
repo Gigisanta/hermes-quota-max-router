@@ -23,7 +23,7 @@ python3.11 -m venv .venv
 .venv/bin/quotamax serve
 ```
 
-La aplicación no lee archivos `.env` por sí sola. Usá `~/.hermes/project-env/HerMaatOS/work/hermes-quota-max-router/` para las claves propias y exportalas al proceso de forma segura. `.env.example` enumera **nombres**, nunca valores. Necesita Redis local, una sola instancia de Uvicorn y espacio para `var/queue.sqlite3` (modo `0600`). La cola puede seguir aceptando trabajos si Redis cae; no hace inferencia hasta que vuelva. No expongas `:8123` fuera de loopback.
+La aplicación no lee archivos `.env` por sí sola. Usá `~/.hermes/project-env/HerMaatOS/work/hermes-quota-max-router/` para las claves propias y exportalas al proceso de forma segura. `.env.example` enumera **nombres**, nunca valores. Necesita Redis local con AOF activado, `appendfsync always` y `maxmemory-policy noeviction`, una sola instancia de Uvicorn y espacio para `var/queue.sqlite3` (modo `0600`). Si Redis cae o pierde esas garantías, la cola sigue aceptando trabajos pero no hay inferencia: un reinicio no puede borrar reservas de cuota y habilitar consumo de más. No expongas `:8123` fuera de loopback.
 
 ## Admisión de proveedores
 

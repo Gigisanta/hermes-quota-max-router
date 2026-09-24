@@ -12,7 +12,7 @@ from free_router.quota import QuotaStore
 
 @pytest.fixture
 def quota() -> QuotaStore:
-    return QuotaStore(fakeredis.FakeRedis(decode_responses=True))
+    return QuotaStore(fakeredis.FakeRedis(decode_responses=True), require_durable=False)
 
 
 @pytest.fixture

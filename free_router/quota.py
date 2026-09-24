@@ -51,14 +51,45 @@ def _day_window(now: datetime, tz: str) -> tuple[str, int]:
 
 
 class QuotaStore:
-    def __init__(self, client: redis.Redis):
+    def __init__(self, client: redis.Redis, *, require_durable: bool = True):
         self.client: Any = client
+        self.require_durable = require_durable
+
+    def healthy(self) -> bool:
+        """A restarted or evicting Redis must not erase today's quota ledger."""
+        try:
+            if not self.client.ping():
+                return False
+            if not self.require_durable:
+                return True
+            settings = {
+                key: self.client.config_get(key).get(key)
+                for key in ("appendonly", "appendfsync", "maxmemory-policy")
+            }
+            persistence = self.client.info("persistence")
+            return (
+                settings
+                == {
+                    "appendonly": "yes",
+                    "appendfsync": "always",
+                    "maxmemory-policy": "noeviction",
+                }
+                and persistence.get("aof_enabled") == 1
+                and persistence.get("aof_last_write_status") == "ok"
+            )
+        except redis.RedisError:
+            return False
+
+    def _require_healthy(self) -> None:
+        if not self.healthy():
+            raise RuntimeError("quota_store_unavailable")
 
     @classmethod
     def from_url(cls, url: str) -> QuotaStore:
         client = redis.Redis.from_url(url, decode_responses=True, socket_timeout=2)
-        client.ping()
-        return cls(client)
+        store = cls(client)
+        store._require_healthy()
+        return store
 
     def reserve(
         self,
@@ -71,6 +102,7 @@ class QuotaStore:
         workload_share: float | None = None,
         now: datetime | None = None,
     ) -> Reservation:
+        self._require_healthy()
         now = now or datetime.now(UTC)
         q = spec.quota
         minute = int(now.timestamp() // 60)
@@ -129,6 +161,9 @@ class QuotaStore:
             blocked = int(self.client.eval(_RESERVE, len(keys), *keys, *args))
         except redis.RedisError as exc:
             raise RuntimeError("quota_store_unavailable") from exc
+        # The service can restart or lose AOF guarantees between the first
+        # check and EVAL. Never dispatch an upstream call from that interval.
+        self._require_healthy()
         if blocked:
             return Reservation((), (), windows[blocked - 1][3])
         return Reservation(tuple(keys), tuple(x[1] for x in windows))
@@ -167,6 +202,7 @@ class QuotaStore:
         workload_share: float | None = None,
         now: datetime | None = None,
     ) -> int:
+        self._require_healthy()
         now = now or datetime.now(UTC)
         day, _ = _day_window(now, spec.quota.reset_tz)
         try:
@@ -239,6 +275,7 @@ class QuotaStore:
         return max(0, remaining)
 
     def cooldown_remaining(self, spec: ModelSpec) -> int:
+        self._require_healthy()
         try:
             return max(
                 0,
@@ -260,6 +297,7 @@ class QuotaStore:
         permanent: bool = False,
         account_wide: bool = False,
     ) -> None:
+        self._require_healthy()
         # Permanent upstream access failure requires a fresh verification record.
         ttl = 7 * 86400 if permanent else max(1, seconds)
         try:
