@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -12,7 +13,6 @@ from fastapi.testclient import TestClient
 
 from free_router.app import build_app
 from free_router.config import ModelSpec, load_models
-from free_router.discovery import audit_catalog
 from free_router.provider import ProviderClient, ProviderFailure
 from free_router.queue import JobQueue
 from free_router.quota import QuotaStore
@@ -65,6 +65,7 @@ def _app(catalog: Path, quota: QuotaStore, tmp_path: Path, provider=None):
         queue=JobQueue(tmp_path / "jobs.sqlite3"),
         catalog_path=catalog,
         daily_peak={"journal": 10, "simon-news": 10, "cactus-brief": 10},
+        production_workloads=("journal", "simon-news", "cactus-brief"),
         worker_enabled=False,
     )
 
@@ -180,7 +181,7 @@ def test_exhaustion_is_durable_202_never_fake_success(catalog, quota, tmp_path, 
         catalog,
         quota,
         tmp_path,
-        FakeProvider({"gemini", "groq", "cloudflare", "siliconflow", "openrouter"}),
+        FakeProvider({"gemini", "groq", "cloudflare", "siliconflow"}),
     )
     with TestClient(app) as client:
         response = client.post("/v1/chat/completions", json=_body(), headers=_headers())
@@ -307,16 +308,42 @@ def test_idempotent_begin_is_atomic(tmp_path):
     assert sum(inserted for _, inserted in results) == 1
 
 
-def test_paid_openrouter_variant_is_rejected(catalog, monkeypatch):
+def test_openrouter_is_not_an_admitted_provider(catalog):
     raw = json.loads(catalog.read_text())["models"][0]
     raw.update(
         provider="openrouter",
-        model="anthropic/claude",
-        evidence_url="https://openrouter.ai/pricing",
+        model="vendor/model:free",
+        evidence_url="https://openrouter.ai/docs/guides/routing/model-variants/free",
     )
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    with pytest.raises(ValueError, match="paid_openrouter_model"):
+    with pytest.raises(ValueError, match="unknown_provider"):
         ModelSpec.parse(raw)
+
+
+@pytest.mark.asyncio
+async def test_novita_free_model_uses_documented_rest_path(catalog, monkeypatch):
+    raw = json.loads(catalog.read_text())["models"][0]
+    raw.update(
+        provider="novita",
+        model="inclusionai/ling-3.0-flash-fin",
+        evidence_url="https://novita.ai/models/model-detail/inclusionai-ling-3.0-flash-fin",
+    )
+    monkeypatch.setenv("NOVITA_API_KEY", "test-key")
+    spec = ModelSpec.parse(raw)
+    seen: list[str] = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx.Response(
+            200,
+            json={
+                "model": spec.model,
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await ProviderClient(client).complete(spec, [{"role": "user", "content": "dato"}], 32, 0)
+    assert seen == ["https://api.novita.ai/openai/v1/chat/completions"]
 
 
 @pytest.mark.asyncio
@@ -401,43 +428,22 @@ def test_official_evidence_must_use_https(catalog):
         ModelSpec.parse(raw)
 
 
-@pytest.mark.asyncio
-async def test_price_flip_demotes_openrouter(tmp_path, quota, monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    now = datetime.now(UTC).isoformat()
-    raw = {
-        "provider": "openrouter",
-        "model": "vendor/model:free",
-        "workloads": ["journal"],
-        "stages": ["author"],
-        "context_tokens": 4096,
-        "quota": {"rpm": 20, "rpd": 50, "tpm": 10000, "tpd": 100000},
-        "evidence_url": "https://openrouter.ai/pricing",
-        "evidence_checked_at": now,
-        "account_checked_at": now,
-        "no_billing": True,
-        "zero_price": True,
-        "smoke_passed": True,
-        "quality_passed": True,
-    }
-    spec = ModelSpec.parse(raw)
+@pytest.mark.parametrize("revoked", ["zero_price", "no_billing"])
+def test_price_or_billing_change_removes_provider_from_reserve(catalog, quota, revoked):
+    raw = json.loads(catalog.read_text())
+    standby = next(row for row in raw["models"] if row["provider"] == "siliconflow")
+    standby[revoked] = False
+    catalog.write_text(json.dumps(raw), encoding="utf-8")
 
-    def handler(request):
-        if "models" in str(request.url):
-            return httpx.Response(
-                200,
-                json={
-                    "data": [
-                        {"id": "vendor/model:free", "pricing": {"prompt": "0.1", "completion": "0"}}
-                    ]
-                },
-            )
-        return httpx.Response(200, text="directory")
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        report = await audit_catalog([spec], quota, client=client, output=tmp_path / "audit.json")
-    assert spec.id in report["demoted"]
-    assert quota.cooldown_remaining(spec) > 0
+    router = EditorialRouter(
+        quota,
+        FakeProvider(),
+        catalog,
+        {"journal": 10, "simon-news": 10, "cactus-brief": 10},
+    )
+    assert router.readiness("journal")["providers"] == 3
+    assert not router.readiness("journal")["ready"]
+    assert router.rejected["siliconflow/test-siliconflow"] == "unverified_free_model"
 
 
 def test_missing_verified_catalog_queues_without_call(tmp_path, quota, monkeypatch):
@@ -446,6 +452,102 @@ def test_missing_verified_catalog_queues_without_call(tmp_path, quota, monkeypat
     with TestClient(_app(tmp_path / "absent.json", quota, tmp_path, fake)) as client:
         response = client.post("/v1/chat/completions", json=_body(), headers=_headers())
     assert response.status_code == 202
+    assert fake.calls == []
+
+
+def test_production_requires_explicit_adoption(catalog, quota, tmp_path, monkeypatch):
+    monkeypatch.setenv("ROUTER_TOKEN_JOURNAL", "journal-token")
+    fake = FakeProvider()
+    app = build_app(
+        quota=quota,
+        provider=fake,
+        queue=JobQueue(tmp_path / "jobs.sqlite3"),
+        catalog_path=catalog,
+        daily_peak={"journal": 10, "simon-news": 10, "cactus-brief": 10},
+        production_workloads=(),
+        worker_enabled=False,
+    )
+    with TestClient(app) as client:
+        response = client.post("/v1/chat/completions", json=_body(), headers=_headers())
+        assert response.status_code == 202
+        assert response.json()["reason"] == "production_not_adopted"
+        assert not client.get("/v1/router/status").json()["production"]["journal"]["activated"]
+    assert fake.calls == []
+
+
+def test_activated_workload_uses_remaining_free_providers_during_reserve_deficit(
+    catalog, quota, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("ROUTER_TOKEN_JOURNAL", "journal-token")
+    fake = FakeProvider()
+    app = _app(catalog, quota, tmp_path, fake)
+    with TestClient(app) as client:
+        first = client.post("/v1/chat/completions", json=_body(), headers=_headers())
+        assert first.status_code == 200
+        assert client.get("/v1/router/status").json()["production"]["journal"]["activated"]
+        day = datetime.now(UTC).date().isoformat()
+        quota.client.set(f"fr:v1:siliconflow:rpd:{day}", 90)
+        reserve = client.get("/v1/router/status").json()["workloads"]["journal"]
+        assert reserve["providers"] == 3
+        assert not reserve["ready"]
+        second = client.post(
+            "/v1/chat/completions",
+            json=_body("Otra fuente pública"),
+            headers=_headers(),
+        )
+        assert second.status_code == 200
+        assert second.json()["router"]["provider"] != "siliconflow"
+    restarted = _app(catalog, quota, tmp_path, fake)
+    with TestClient(restarted) as client:
+        third = client.post(
+            "/v1/chat/completions",
+            json=_body("Tercera fuente pública"),
+            headers=_headers(),
+        )
+        assert third.status_code == 200
+        assert third.json()["router"]["provider"] != "siliconflow"
+
+
+def test_queued_pilot_loses_bypass_when_pilot_mode_is_disabled(
+    catalog, quota, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("ROUTER_PILOT_MODE", "0")
+    quota.activate_production("journal")
+
+    async def skip_daily_audit(*args, **kwargs):
+        return {}
+
+    monkeypatch.setattr("free_router.app.audit_all", skip_daily_audit)
+    fake = FakeProvider()
+    queue = JobQueue(tmp_path / "jobs.sqlite3")
+    job_id = queue.enqueue(
+        "journal",
+        "author",
+        {
+            "body": {
+                "messages": [{"role": "user", "content": "Dato público"}],
+                "max_tokens": 100,
+                "temperature": 0,
+            },
+            "pilot": True,
+        },
+        "queued-pilot",
+        0,
+    )
+    app = build_app(
+        quota=quota,
+        provider=fake,
+        queue=queue,
+        catalog_path=catalog,
+        daily_peak={"journal": 10, "simon-news": 10, "cactus-brief": 10},
+        production_workloads=("journal",),
+    )
+    with TestClient(app):
+        for _ in range(100):
+            if queue.get(job_id, "journal")["attempts"] > 0:
+                break
+            time.sleep(0.01)
+    assert queue.get(job_id, "journal")["status"] == "queued"
     assert fake.calls == []
 
 
@@ -494,6 +596,7 @@ def test_exhausted_account_is_removed_from_current_reserve(catalog, quota):
         FakeProvider(),
         catalog,
         {"journal": 10, "simon-news": 10, "cactus-brief": 10},
+        production_workloads=("journal",),
     )
     day = datetime.now(UTC).date().isoformat()
     quota.client.set(f"fr:v1:siliconflow:rpd:{day}", 90)
@@ -510,6 +613,7 @@ async def test_reserve_deficit_retries_at_next_daily_quota_window(catalog, quota
         FakeProvider(),
         catalog,
         {"journal": 10, "simon-news": 10, "cactus-brief": 10},
+        production_workloads=("journal",),
     )
     spec = next(model for model in load_models(catalog)[0] if model.provider == "siliconflow")
     day = datetime.now(UTC).date().isoformat()

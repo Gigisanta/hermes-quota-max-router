@@ -1,4 +1,4 @@
-"""Daily official catalog audit; discovery never grants routing access by itself."""
+"""Daily reference discovery and real-access audit; neither grants admission."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import json
 import os
 import re
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -16,21 +15,15 @@ from free_router.config import ModelSpec
 from free_router.provider import ProviderClient, ProviderFailure
 from free_router.quota import QuotaStore
 
-OPENROUTER_MODELS = "https://openrouter.ai/api/v1/models"
 FREE_LLM_DIRECTORY = "https://raw.githubusercontent.com/nejib1/Free-LLM/main/README.md"
+QUICKREF_START = "<!--TABLE:QUICKREF:START-->"
+QUICKREF_END = "<!--TABLE:QUICKREF:END-->"
 ACCESS_AUDIT_PROMPT = (
     "Dato público de prueba: La biblioteca municipal abre el martes a las 10. "
     "Redactá una sola oración informativa, fiel al dato y sin agregar información."
 )
 ACCESS_AUDIT_OUTPUT_TOKENS = 48
 ACCESS_AUDIT_COOLDOWN_SECONDS = 24 * 60 * 60
-
-
-def _zero(value: object) -> bool:
-    try:
-        return Decimal(str(value)) == 0
-    except (InvalidOperation, TypeError):
-        return False
 
 
 def _atomic_json(path: Path, payload: dict) -> None:
@@ -61,6 +54,28 @@ def _provider_limits(models: list[ModelSpec], provider: str) -> tuple[int, int, 
     )
 
 
+def _directory_entries(readme: str) -> list[dict[str, str]]:
+    """Extract names from the directory, never instructions or admission evidence."""
+    start = readme.find(QUICKREF_START)
+    end = readme.find(QUICKREF_END, start + len(QUICKREF_START))
+    if start < 0 or end < 0:
+        return []
+    table = readme[start + len(QUICKREF_START) : end]
+    names: set[str] = set()
+    for line in table.splitlines()[:120]:
+        match = re.match(
+            r"^\|\s*\[([A-Za-z0-9][A-Za-z0-9 ._()+-]{0,79})\]"
+            r"\(https://[^)\s]+\)\s*\|",
+            line,
+        )
+        if match:
+            names.add(match.group(1).strip())
+    return [
+        {"name": name, "status": "unvetted_directory_entry"}
+        for name in sorted(names, key=str.casefold)
+    ]
+
+
 async def audit_catalog(
     models: list[ModelSpec],
     quota: QuotaStore,
@@ -68,57 +83,30 @@ async def audit_catalog(
     client: httpx.AsyncClient | None = None,
     output: Path = Path("var/discovery.json"),
 ) -> dict:
+    # Keep the historical arguments for callers; the directory is reference-only.
     own_client = client is None
     client = client or httpx.AsyncClient(timeout=15)
     result: dict = {
         "checked_at": datetime.now(UTC).isoformat(),
         "sources": {},
+        "directory_entries": [],
         "candidates": [],
         "demoted": [],
     }
     try:
         try:
-            response = await client.get(OPENROUTER_MODELS)
-            response.raise_for_status()
-            payload = response.json()
-            data = payload.get("data") if isinstance(payload, dict) else None
-            if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
-                raise ValueError("invalid_model_catalog")
-            free_models = {}
-            for row in data:
-                mid = row.get("id", "")
-                pricing = row.get("pricing") or {}
-                if (
-                    mid.endswith(":free")
-                    and _zero(pricing.get("prompt"))
-                    and _zero(pricing.get("completion"))
-                    and _zero(pricing.get("request", "0"))
-                ):
-                    free_models[mid] = row
-            result["sources"]["openrouter"] = {"status": "ok", "free_models": len(free_models)}
-            known = {m.model for m in models if m.provider == "openrouter"}
-            result["candidates"] = [
-                {
-                    "provider": "openrouter",
-                    "model": mid,
-                    "context_tokens": row.get("context_length"),
-                }
-                for mid, row in free_models.items()
-                if mid not in known
-            ]
-            for model in models:
-                if model.provider == "openrouter" and model.model not in free_models:
-                    quota.cool_down(model, 7 * 86400, permanent=True)
-                    result["demoted"].append(model.id)
-        except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
-            result["sources"]["openrouter"] = {
-                "status": "unavailable",
-                "reason": type(exc).__name__,
-            }
-        try:
             response = await client.get(FREE_LLM_DIRECTORY)
+            if response.status_code == 200:
+                result["directory_entries"] = _directory_entries(response.text[:1_000_000])
+            directory_ok = bool(result["directory_entries"])
             result["sources"]["free_llm_directory"] = {
-                "status": "ok" if response.status_code == 200 else "unavailable",
+                "status": (
+                    "ok"
+                    if directory_ok
+                    else "malformed"
+                    if response.status_code == 200
+                    else "unavailable"
+                ),
                 "reference_only": True,
             }
         except httpx.HTTPError:
@@ -243,11 +231,8 @@ async def audit_access(
             )
 
         actual_model = result.get("actual_model")
-        permitted_models = {spec.model}
-        if spec.provider == "openrouter":
-            permitted_models.add(spec.model.removesuffix(":free"))
         smoke_passed = (
-            actual_model in permitted_models
+            actual_model == spec.model
             and isinstance(result.get("content"), str)
             and _editorial_smoke_passed(result["content"])
         )
@@ -291,28 +276,14 @@ async def audit_all(
     try:
         catalog = await audit_catalog(models, quota, client=provider.client, output=catalog_output)
     except Exception:
-        # An unavailable or unpersistable live catalog is not price evidence.
+        # A failed reference lookup does not affect the independently verified models.
         catalog = {
             "checked_at": datetime.now(UTC).isoformat(),
-            "sources": {"openrouter": {"status": "unavailable", "reason": "audit_failed"}},
+            "sources": {"free_llm_directory": {"status": "unavailable", "reason": "audit_failed"}},
+            "directory_entries": [],
             "candidates": [],
             "demoted": [],
         }
 
-    openrouter_source = catalog.get("sources", {}).get("openrouter", {})
-    demoted = set(catalog.get("demoted", []))
-    blocked: dict[str, str] = {}
-    for spec in models:
-        if spec.provider != "openrouter":
-            continue
-        if openrouter_source.get("status") != "ok":
-            blocked[spec.id] = "openrouter_free_catalog_unavailable"
-            try:
-                quota.cool_down(spec, ACCESS_AUDIT_COOLDOWN_SECONDS)
-            except RuntimeError:
-                pass
-        elif spec.id in demoted:
-            blocked[spec.id] = "openrouter_model_not_in_free_catalog"
-
-    access = await audit_access(models, quota, provider, blocked=blocked, output=access_output)
+    access = await audit_access(models, quota, provider, output=access_output)
     return {"catalog": catalog, "access": access}

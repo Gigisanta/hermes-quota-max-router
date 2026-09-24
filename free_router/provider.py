@@ -78,10 +78,7 @@ class ProviderClient:
             if finish_reason != "stop":
                 raise ValueError("incomplete_upstream_response")
             actual_model = data["model"]
-            allowed_models = {spec.model}
-            if spec.provider == "openrouter":
-                allowed_models.add(spec.model.removesuffix(":free"))
-            if not isinstance(actual_model, str) or actual_model not in allowed_models:
+            if not isinstance(actual_model, str) or actual_model != spec.model:
                 raise ValueError("unverified_upstream_model")
             usage = data.get("usage") or {}
             prompt = usage.get("prompt_tokens")

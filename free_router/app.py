@@ -86,6 +86,7 @@ def build_app(
     queue: JobQueue | None = None,
     catalog_path: Path | None = None,
     daily_peak: dict[str, int] | None = None,
+    production_workloads: tuple[str, ...] | None = None,
     worker_enabled: bool = True,
 ) -> FastAPI:
     if quota is None:
@@ -103,6 +104,7 @@ def build_app(
         provider,
         catalog_path or Path(os.getenv("ROUTER_VERIFIED_MODELS", "var/verified-models.json")),
         daily_peak or _peak_config(),
+        production_workloads=production_workloads,
     )
 
     def complete_job(job_id: str, result: dict) -> None:
@@ -135,6 +137,10 @@ def build_app(
                 job = queue.claim_due()
                 if job:
                     payload = job["request"]
+                    if payload.get("pilot", False) and os.getenv("ROUTER_PILOT_MODE") != "1":
+                        # A queued calibration job must never become production work.
+                        queue.reschedule(job["id"], 300)
+                        continue
                     started = time.monotonic()
                     result = await router.attempt(
                         payload["body"],

@@ -11,11 +11,13 @@ reserva. Si alguna desaparece, cierra todas las rutas remotas.
 
 | Proveedor | Evidencia revisada | Falta para contar capacidad |
 | --- | --- | --- |
-| Gemini Free | La sesión de Google de MaatWork muestra un proyecto existente en nivel Free. Para Gemini 3.1 Flash Lite mostró 15 RPM, 250.000 TPM y 500 RPD. Una clave preexistente etiquetada para iStock devolvió HTTP 200 al listar modelos, sin probar generación ni vinculación con ese proyecto Free. | Crear una clave dedicada sin facturación, confirmar precio y límites del proyecto que vaya a usar el router, hacer llamada real y evaluación editorial. El intento de crear un proyecto exclusivo fue rechazado por AI Studio como solicitud sospechosa; no se repitió ni se creó una clave. |
+| Gemini Free | La sesión de Google de MaatWork muestra el proyecto `maatworkyoutube` en nivel Free. Para Gemini 3.1 Flash Lite mostró 15 RPM, 250.000 TPM y 500 RPD. Una clave preexistente etiquetada para iStock devolvió HTTP 200 al listar modelos, sin probar generación ni vinculación con ese proyecto Free. | Crear una clave dedicada sin facturación, confirmar precio y límites del proyecto que vaya a usar el router, hacer llamada real y evaluación editorial. Tras la autorización del usuario, el intento de crear `MaatWork Free Editorial Router` en el proyecto existente fue rechazado por AI Studio con «The request is suspicious». No se creó ninguna clave ni se intentó eludir el bloqueo. |
 | Groq Free | MaatWork (`maatwork.comercial@gmail.com`) pudo entrar en su organización Personal y proyecto Default. Facturación muestra **Free, $0, plan actual**. Los límites de la cuenta para `openai/gpt-oss-120b`, `openai/gpt-oss-20b` y `qwen/qwen3.8-27b` muestran 30 RPM, 1.000 RPD, 8.000 TPM y 200.000 TPD por modelo. En Playground, `openai/gpt-oss-120b` respondió una prueba sintética de dos movimientos de mercado con cifras y direcciones correctas; esto no acredita la evaluación editorial. Ya existe una clave denominada `iStock production fallback verified`; una consulta de sólo lectura con la credencial preexistente devolvió HTTP 403. No se mostró su valor ni se reutilizó para generar. [Límites de Groq](https://console.groq.com/docs/rate-limits). | Clave dedicada para el router, llamada real con esa clave y evaluación editorial por carga. Estos límites no se cuentan como capacidad apta hasta completar esas pruebas. |
+| Novita AI | La [página oficial de Ling 3.0 Flash Fin](https://novita.ai/models/model-detail/inclusionai-ling-3.0-flash-fin) muestra $0 por millón de tokens de entrada y salida y API compatible con OpenAI. La [guía oficial](https://blogs.novita.ai/es/ling-3-0-flash-fin-on-novita-ai/) menciona 30 RPM como límite de catálogo, sujeto a la cuenta. Su [AUP §5(6)](https://novita.ai/legal/acceptable-use-policy) restringe usos para competir con Novita: sólo se evalúa como cliente interno editorial, nunca como servicio de enrutamiento ofrecido a terceros. El adaptador ya reconoce Novita, pero el modelo no está admitido. | Alta de MaatWork pendiente de consentimiento de términos, verificar que el precio siga en cero y los límites diarios de la cuenta, clave dedicada, llamada real y evaluación editorial. La especialización financiera puede servir a Cactus; no se presupone aptitud para Journal o Simón. |
 | Cloudflare Workers AI Free | [10.000 Neurons diarios en Workers Free](https://developers.cloudflare.com/workers-ai/platform/pricing/); se corta al llegar al cupo. | Acceso de MaatWork, token acotado, modelo utilizable en Free, tasa de Neurons, smoke y calidad. |
 | SiliconFlow Free | [Modelos de precio cero y límites por cuenta](https://docs.siliconflow.cn/docs/userguide/faqs/rate-limit-and-upgradation). La pantalla de alta ofrece teléfono, correo con código y WeChat; no apareció inicio con Google. La documentación exige verificación de identidad real para usar todos los modelos gratuitos. | Acceso de MaatWork por correo, consentimiento de términos, verificación de identidad por el titular, cuota exacta y modelo de calidad suficiente; sin esos datos no es reserva. |
-| OpenRouter `:free` | [Variantes gratuitas](https://openrouter.ai/docs/guides/routing/model-variants/free) publicadas. | Acceso, precio y cuota de la cuenta; sólo capacidad extra, no proveedor independiente. |
+| Mistral Free | La cuenta Google de MaatWork ya es reconocida por AI Studio. Su [modo Free](https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key) permite API sin tarjeta y su [plan actual](https://mistral.ai/pricing/) anuncia USD 10/mes de créditos, consumidos contra precios por modelo. [Mistral lo destina a evaluación y prototipado](https://help.mistral.ai/en/articles/698531-why-am-i-hitting-api-rate-limits-and-how-do-i-increase-them). La consola exige aceptar sus términos antes de mostrar límites. | Consentimiento pendiente; no cuenta como tarifa cero por modelo ni como reserva productiva sostenida. |
+| OpenRouter `:free` | Sus [términos, §7(4)](https://openrouter.ai/terms) prohíben usar el servicio para desarrollar uno competidor. | Excluido del registro y de la auditoría automática; no se abrió cuenta. Sólo reconsiderar con autorización escrita específica del operador. |
 
 [Cerebras](https://www.cerebras.ai/inference) anuncia crédito inicial de prueba:
 se quitó del registro de backends admitidos. [Z.ai](https://chat.z.ai/legal-agreement/terms-of-service)
@@ -38,6 +40,28 @@ ofrece USD 0,10 de crédito mensual sobre tarifas pagas, no modelos de tarifa
 cero. [FreeInference](https://freeinference.org/terms) es experimental,
 registra entradas y salidas para investigación y no publica una cuota estable.
 Ninguno acredita una cuarta reserva independiente permanente.
+
+[Ollama Cloud Free](https://ollama.com/pricing) reinicia mensualmente un pequeño
+saldo de uso, pero cobra cada modelo por token; [Aion Labs Free](https://www.aionlabs.ai/pricing/)
+da un crédito diario contra modelos con [precio por token](https://www.aionlabs.ai/docs/models/).
+Son límites de gasto incluidos, no modelos de tarifa cero. [ModelScope
+API-Inference](https://community.modelscope.cn/675262372db35d1195183bdb.html)
+advierte expresamente no usar su beta gratuita para producción. [Hetzner
+Experiments](https://docs.hetzner.com/general/company-and-policy/experiments/openclaw/)
+es gratis sólo durante su fase experimental y desaconseja producción.
+[Nous Portal](https://portal.nousresearch.com/terms) limita el acceso por
+competidores y tiene cuota gratuita ambigua entre plan y prueba: tampoco se
+admite. [LLM7](https://github.com/chigwell/llm7.io/blob/main/TERMS.md) publica
+cupo gratuito para investigación, pero sus términos prohíben usarlo como
+*gateway* o integrarlo en productos o flujos para terceros sin permiso escrito,
+y descartan expresamente producción. Se excluye; no se creó cuenta ni se probó
+su API.
+
+[OVHcloud AI Endpoints](https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-getting-started)
+exige un proyecto con medio de pago para claves de API; la modalidad anónima
+tiene 2 RPM por IP y modelo, pero no acredita precio cero ni cuota diaria
+garantizada. [Pollinations](https://enter.pollinations.ai/terms) consume Pollen
+por petición; sus grants y recompensas gratuitos no son una tarifa cero estable.
 
 ## Próxima comprobación necesaria
 

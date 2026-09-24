@@ -18,7 +18,7 @@ def quota() -> QuotaStore:
 @pytest.fixture
 def catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     now = datetime.now(UTC).isoformat()
-    providers = ["gemini", "groq", "cloudflare", "siliconflow", "openrouter"]
+    providers = ["gemini", "groq", "cloudflare", "siliconflow"]
     rows = []
     monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "test-account")
     for provider in providers:
@@ -31,15 +31,8 @@ def catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "groq": "console.groq.com",
             "cloudflare": "developers.cloudflare.com",
             "siliconflow": "siliconflow.cn",
-            "openrouter": "openrouter.ai",
         }[provider]
-        model = (
-            "@cf/zai-org/glm-4.7-flash"
-            if provider == "cloudflare"
-            else "test/model:free"
-            if provider == "openrouter"
-            else f"test-{provider}"
-        )
+        model = "@cf/zai-org/glm-4.7-flash" if provider == "cloudflare" else f"test-{provider}"
         model_quota = {"rpm": 100, "rpd": 100, "tpm": 100000, "tpd": 1000000}
         if provider == "cloudflare":
             model_quota.update(
@@ -62,7 +55,7 @@ def catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 "zero_price": True,
                 "smoke_passed": True,
                 "quality_passed": True,
-                "standby": provider in {"siliconflow", "openrouter"},
+                "standby": provider == "siliconflow",
             }
         )
     path = tmp_path / "verified.json"

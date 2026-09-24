@@ -24,7 +24,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("serve", help="Serve on 127.0.0.1:8123 only")
     sub.add_parser("status", help="Show verified reserve without secrets")
-    sub.add_parser("audit", help="Check official catalogs and save candidates")
+    sub.add_parser("audit", help="Check reference directory and probe admitted models")
     args = parser.parse_args()
     if args.command == "serve":
         uvicorn.run("free_router.app:app", host="127.0.0.1", port=8123, workers=1)

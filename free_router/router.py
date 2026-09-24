@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -27,6 +28,7 @@ class EditorialRouter:
         provider: ProviderClient,
         catalog_path: Path,
         daily_peak: dict[str, int],
+        production_workloads: tuple[str, ...] | None = None,
     ):
         self.quota = quota
         self.provider = provider
@@ -35,6 +37,14 @@ class EditorialRouter:
             workload: peak
             for workload, peak in daily_peak.items()
             if workload in WORKLOADS and type(peak) is int and peak > 0
+        }
+        configured = (
+            production_workloads
+            if production_workloads is not None
+            else tuple(os.getenv("ROUTER_PRODUCTION_WORKLOADS", "").split(","))
+        )
+        self.production_workloads = {
+            name.strip() for name in configured if name.strip() in WORKLOADS
         }
         self.models: list[ModelSpec] = []
         self.rejected: dict[str, str] = {}
@@ -108,18 +118,17 @@ class EditorialRouter:
                 "measured_peak_requests": self.daily_peak.get(workload),
                 "reasons": ["quota_store_unavailable"],
             }
-        # An aggregator route is extra capacity, not an independent upstream.
-        core = [m for m in eligible if m.provider != "openrouter"]
         providers = {
             m.provider
-            for m in core
-            if any(other.provider == m.provider and "author" in other.stages for other in core)
-            and any(other.provider == m.provider and "reviewer" in other.stages for other in core)
+            for m in eligible
+            if any(other.provider == m.provider and "author" in other.stages for other in eligible)
+            and any(
+                other.provider == m.provider and "reviewer" in other.stages for other in eligible
+            )
         }
-        active = {m.provider for m in core if m.provider in providers and not m.standby}
-        standby = {m.provider for m in core if m.provider in providers and m.standby}
+        active = {m.provider for m in eligible if m.provider in providers and not m.standby}
+        standby = {m.provider for m in eligible if m.provider in providers and m.standby}
         peak = self.daily_peak.get(workload)
-        extra = {m.provider for m in eligible if m.provider == "openrouter"}
         try:
             remaining = {
                 p: self.quota.remaining_daily_requests(
@@ -129,7 +138,7 @@ class EditorialRouter:
                     workload=workload,
                     workload_share=self._workload_share(workload),
                 )
-                for p in providers | extra
+                for p in providers
             }
             full_remaining = {
                 p: self.quota.remaining_daily_requests(
@@ -137,7 +146,7 @@ class EditorialRouter:
                     provider_rpd=self._provider_cap(p)[1],
                     provider_tpd=self._provider_cap(p)[3],
                 )
-                for p in providers | extra
+                for p in providers
             }
         except RuntimeError:
             return {
@@ -186,8 +195,20 @@ class EditorialRouter:
         pilot: bool = False,
     ) -> Attempt:
         self.reload()  # Expired attestations stop routing without a restart.
-        if not pilot and not self.readiness(workload)["ready"]:
-            return Attempt(None, self._next_window(workload), "reserve_not_ready")
+        if not pilot:
+            if workload not in self.production_workloads:
+                return Attempt(None, 300, "production_not_adopted")
+            try:
+                activated = self.quota.production_activated(workload)
+            except RuntimeError:
+                return Attempt(None, 60, "quota_store_unavailable")
+            if not activated:
+                if not self.readiness(workload)["ready"]:
+                    return Attempt(None, self._next_window(workload), "reserve_not_ready")
+                try:
+                    self.quota.activate_production(workload)
+                except RuntimeError:
+                    return Attempt(None, 60, "quota_store_unavailable")
         messages = request["messages"]
         max_tokens = request["max_tokens"]
         # UTF-8 byte count is a conservative token estimate for multilingual text.
@@ -290,8 +311,16 @@ class EditorialRouter:
 
     def status(self) -> dict:
         self.reload()
+        try:
+            activated = {w: self.quota.production_activated(w) for w in WORKLOADS}
+        except RuntimeError:
+            activated = {w: False for w in WORKLOADS}
         return {
             "workloads": {w: self.readiness(w) for w in ("journal", "simon-news", "cactus-brief")},
+            "production": {
+                w: {"adopted": w in self.production_workloads, "activated": activated[w]}
+                for w in WORKLOADS
+            },
             "verified_models": len(self.models),
             "rejected": self.rejected,
             "checked_at": datetime.now(UTC).isoformat(),

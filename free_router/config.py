@@ -20,6 +20,7 @@ PROVIDERS = {
         "ai.google.dev",
     ),
     "groq": ("https://api.groq.com/openai/v1", "openai", "GROQ_API_KEY", "console.groq.com"),
+    "novita": ("https://api.novita.ai/openai/v1", "openai", "NOVITA_API_KEY", "novita.ai"),
     "siliconflow": (
         "https://api.siliconflow.cn/v1",
         "openai",
@@ -27,7 +28,6 @@ PROVIDERS = {
         "siliconflow.cn",
     ),
     "cloudflare": ("", "cloudflare", "CLOUDFLARE_API_TOKEN", "developers.cloudflare.com"),
-    "openrouter": ("https://openrouter.ai/api/v1", "openai", "OPENROUTER_API_KEY", "openrouter.ai"),
 }
 MAX_EVIDENCE_AGE = timedelta(days=7)
 
@@ -89,8 +89,6 @@ class ModelSpec:
         model = raw.get("model")
         if not isinstance(model, str) or not model or any(ch.isspace() for ch in model):
             raise ValueError("invalid_model")
-        if provider == "openrouter" and not model.endswith(":free"):
-            raise ValueError("paid_openrouter_model")
         evidence_url = raw.get("evidence_url", "")
         parsed_evidence = urlparse(evidence_url)
         host = parsed_evidence.hostname or ""

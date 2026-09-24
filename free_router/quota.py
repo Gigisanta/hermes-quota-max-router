@@ -84,6 +84,27 @@ class QuotaStore:
         if not self.healthy():
             raise RuntimeError("quota_store_unavailable")
 
+    def production_activated(self, workload: str) -> bool:
+        """Read the durable record of a workload's first four-provider admission."""
+        self._require_healthy()
+        try:
+            return self.client.exists(f"fr:v1:production-activated:{workload}") == 1
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+
+    def activate_production(self, workload: str) -> None:
+        """Latch admission; callers must check reserve readiness before this write."""
+        self._require_healthy()
+        try:
+            self.client.set(
+                f"fr:v1:production-activated:{workload}",
+                datetime.now(UTC).isoformat(),
+                nx=True,
+            )
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+        self._require_healthy()
+
     @classmethod
     def from_url(cls, url: str) -> QuotaStore:
         client = redis.Redis.from_url(url, decode_responses=True, socket_timeout=2)
