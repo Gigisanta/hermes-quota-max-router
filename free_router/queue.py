@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -235,6 +236,22 @@ class JobQueue:
                    FROM events WHERE created_at>=?
                    GROUP BY workload, stage, status, provider, model""",
                 (since,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def daily_request_counts(self, *, days: int = 7) -> list[dict]:
+        """Count unique accepted jobs by UTC day, including work still queued."""
+        if days < 1:
+            raise ValueError("days_must_be_positive")
+        today = datetime.now(UTC).date()
+        first_day = today - timedelta(days=days - 1)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT date(created_at, 'unixepoch') AS day, workload,
+                          COUNT(*) AS requests
+                   FROM jobs WHERE created_at >= ?
+                   GROUP BY day, workload ORDER BY day, workload""",
+                (datetime.combine(first_day, datetime.min.time(), tzinfo=UTC).timestamp(),),
             ).fetchall()
         return [dict(row) for row in rows]
 

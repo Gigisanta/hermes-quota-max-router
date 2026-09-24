@@ -5,7 +5,7 @@ El router y los tres adaptadores arrancan desactivados. Este piloto dura **siete
 ## Preparación
 
 1. Verificá una sola cuenta MaatWork por proveedor, sin tarjeta ni facturación, y registrá tarifa cero, condiciones de API, cuotas exactas, fecha, modelo y cargas autorizadas en el catálogo local. Ningún crédito de prueba cuenta como capacidad estable. Guardá claves sólo en el almacén del proyecto.
-2. Medí el pico diario de solicitudes de Journal, Simón y Cactus durante siete días de ejecución actual. Registrá los tres números positivos en `var/daily-peak.json`. `quotamax status` debe mostrar tres proveedores activos, uno de reserva y capacidad gratuita de al menos el doble del pico de cada carga y del total compartido.
+2. Medí el pico diario de solicitudes de Journal, Simón y Cactus durante siete días de ejecución actual. Registrá los tres números positivos en `var/daily-peak.json`. Durante el piloto, `/v1/router/metrics` expone `daily_requests`: trabajos únicos aceptados por día UTC y carga, incluidos los que siguen en cola; los reintentos idempotentes no suman otra vez. Compará esa serie con el pico del flujo actual antes de actualizarlo. `quotamax status` debe mostrar tres proveedores activos, uno de reserva y capacidad gratuita de al menos el doble del pico de cada carga y del total compartido.
 3. Ejecutá `quotamax audit` y conservá sus reportes `var/discovery.json` y `var/access-audit.json`. El smoke diario prueba acceso y una afirmación mínima; no acredita calidad general ni facturación. Revisá precio y cuotas en las consolas oficiales cada día y renová las atestaciones sólo con evidencia real.
 
 ## Casos y medidas

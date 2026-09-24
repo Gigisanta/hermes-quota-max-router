@@ -224,7 +224,12 @@ def build_app(
 
     @app.get("/v1/router/metrics")
     def metrics() -> dict:
-        return {"window_days": 7, "events": queue.metrics(days=7), "queue": queue.counts()}
+        return {
+            "window_days": 7,
+            "events": queue.metrics(days=7),
+            "daily_requests": queue.daily_request_counts(days=7),
+            "queue": queue.counts(),
+        }
 
     @app.get("/v1/models")
     def models() -> dict:

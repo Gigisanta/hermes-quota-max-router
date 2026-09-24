@@ -125,6 +125,8 @@ def test_real_completion_and_distinct_reviewer(catalog, quota, tmp_path, monkeyp
         metrics = client.get("/v1/router/metrics").json()
         assert sum(row["requests"] for row in metrics["events"]) == 2
         assert all("content" not in row for row in metrics["events"])
+        assert sum(row["requests"] for row in metrics["daily_requests"]) == 2
+        assert all("content" not in row for row in metrics["daily_requests"])
 
 
 def test_reviewer_rejects_unverified_author_provider_header(catalog, quota, tmp_path, monkeypatch):
@@ -173,6 +175,27 @@ def test_repeated_completion_returns_durable_result_without_new_provider_call(
     assert first.status_code == second.status_code == 200
     assert first.json()["id"] == second.json()["id"]
     assert len(fake.calls) == 1
+
+
+def test_daily_requests_count_queued_jobs_once_and_separate_utc_days(tmp_path):
+    queue = JobQueue(tmp_path / "jobs.sqlite3")
+    job_id, inserted = queue.begin("journal", "author", {"body": "Dato público"}, "same")
+    assert inserted
+    repeated_id, inserted = queue.begin("journal", "author", {"body": "Dato público"}, "same")
+    assert not inserted and repeated_id == job_id
+    queue.reschedule(job_id, 5)
+    queue.enqueue("simon-news", "author", {"body": "Otro dato público"}, "other", 5)
+    yesterday = datetime.now(UTC).date().toordinal() - 1
+    yesterday_date = datetime.fromordinal(yesterday).replace(tzinfo=UTC)
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE jobs SET created_at=? WHERE id=?",
+            (yesterday_date.timestamp(), job_id),
+        )
+    rows = queue.daily_request_counts(days=7)
+    assert sum(row["requests"] for row in rows) == 2
+    assert {row["workload"] for row in rows} == {"journal", "simon-news"}
+    assert len({row["day"] for row in rows}) == 2
 
 
 def test_exhaustion_is_durable_202_never_fake_success(catalog, quota, tmp_path, monkeypatch):
