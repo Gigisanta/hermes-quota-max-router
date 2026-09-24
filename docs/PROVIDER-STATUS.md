@@ -20,6 +20,13 @@ incluye créditos contra tarifas por modelo. Tampoco cuentan para esta política
 de tarifa estrictamente cero. [Freebuff](https://freebuff.com/terms-of-service)
 queda para uso humano en su app.
 
+[SambaNova Cloud Free](https://cloud.sambanova.ai/plans) exige agregar un medio
+de pago y comprar créditos antes de las primeras solicitudes; no sirve como
+reserva a costo cero. [Together AI](https://support.together.ai/articles/4999040689-where-to-find-your-api-key)
+no entrega claves de API en su nivel gratuito limitado. [GitHub Models](https://docs.github.com/en/github-models)
+cerró el servicio anterior. Estos nombres del directorio de Free-LLM no se
+promueven al registro de capacidad por aparecer allí.
+
 ## Próxima comprobación necesaria
 
 Para cada carga hacen falta cuatro operadores independientes con autor y revisor
