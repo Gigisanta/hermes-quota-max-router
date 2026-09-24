@@ -245,13 +245,17 @@ class JobQueue:
             raise ValueError("days_must_be_positive")
         today = datetime.now(UTC).date()
         first_day = today - timedelta(days=days - 1)
+        start = datetime.combine(first_day, datetime.min.time(), tzinfo=UTC).timestamp()
+        end = datetime.combine(
+            today + timedelta(days=1), datetime.min.time(), tzinfo=UTC
+        ).timestamp()
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT date(created_at, 'unixepoch') AS day, workload,
                           COUNT(*) AS requests
-                   FROM jobs WHERE created_at >= ?
+                   FROM jobs WHERE created_at >= ? AND created_at < ?
                    GROUP BY day, workload ORDER BY day, workload""",
-                (datetime.combine(first_day, datetime.min.time(), tzinfo=UTC).timestamp(),),
+                (start, end),
             ).fetchall()
         return [dict(row) for row in rows]
 
