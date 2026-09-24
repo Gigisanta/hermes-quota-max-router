@@ -40,9 +40,7 @@ class ProviderClient:
             "temperature": temperature,
             "stream": False,
         }
-        # Cerebras documents max_completion_tokens for its chat completions API.
-        # The remaining admitted endpoints accept OpenAI's max_tokens field.
-        body["max_completion_tokens" if spec.provider == "cerebras" else "max_tokens"] = max_tokens
+        body["max_tokens"] = max_tokens
         try:
             response = await self.client.post(
                 spec.api_base.rstrip("/") + "/chat/completions",

@@ -53,8 +53,7 @@ async def test_audit_all_reserves_one_tiny_public_probe_per_model_without_rewrit
         calls.append(body)
         assert body["messages"] == [{"role": "user", "content": ACCESS_AUDIT_PROMPT}]
         assert len(ACCESS_AUDIT_PROMPT.encode("utf-8")) < 180
-        limit_key = "max_completion_tokens" if body["model"] == "test-cerebras" else "max_tokens"
-        assert body[limit_key] == ACCESS_AUDIT_OUTPUT_TOKENS
+        assert body["max_tokens"] == ACCESS_AUDIT_OUTPUT_TOKENS
         assert body["temperature"] == 0.0
         assert body["stream"] is False
         spec_model = body["model"]

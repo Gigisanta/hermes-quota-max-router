@@ -20,11 +20,11 @@ PROVIDERS = {
         "ai.google.dev",
     ),
     "groq": ("https://api.groq.com/openai/v1", "openai", "GROQ_API_KEY", "console.groq.com"),
-    "cerebras": (
-        "https://api.cerebras.ai/v1",
+    "siliconflow": (
+        "https://api.siliconflow.cn/v1",
         "openai",
-        "CEREBRAS_API_KEY",
-        "inference-docs.cerebras.ai",
+        "SILICONFLOW_API_KEY",
+        "siliconflow.cn",
     ),
     "cloudflare": ("", "cloudflare", "CLOUDFLARE_API_TOKEN", "developers.cloudflare.com"),
     "openrouter": ("https://openrouter.ai/api/v1", "openai", "OPENROUTER_API_KEY", "openrouter.ai"),

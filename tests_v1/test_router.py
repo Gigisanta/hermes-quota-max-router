@@ -145,7 +145,7 @@ def test_exhaustion_is_durable_202_never_fake_success(catalog, quota, tmp_path, 
         catalog,
         quota,
         tmp_path,
-        FakeProvider({"gemini", "groq", "cloudflare", "cerebras", "openrouter"}),
+        FakeProvider({"gemini", "groq", "cloudflare", "siliconflow", "openrouter"}),
     )
     with TestClient(app) as client:
         response = client.post("/v1/chat/completions", json=_body(), headers=_headers())
@@ -285,9 +285,9 @@ def test_paid_openrouter_variant_is_rejected(catalog, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cerebras_uses_documented_completion_token_field(catalog, monkeypatch):
-    spec = next(model for model in load_models(catalog)[0] if model.provider == "cerebras")
-    monkeypatch.setenv("CEREBRAS_API_KEY", "test-key")
+async def test_siliconflow_uses_free_model_compatible_chat_endpoint(catalog, monkeypatch):
+    spec = next(model for model in load_models(catalog)[0] if model.provider == "siliconflow")
+    monkeypatch.setenv("SILICONFLOW_API_KEY", "test-key")
     seen = []
 
     def handler(request):
@@ -305,8 +305,8 @@ async def test_cerebras_uses_documented_completion_token_field(catalog, monkeypa
             spec, [{"role": "user", "content": "Texto público"}], 123, 0.3
         )
     assert result["content"] == "ok"
-    assert seen[0]["max_completion_tokens"] == 123
-    assert "max_tokens" not in seen[0]
+    assert seen[0]["max_tokens"] == 123
+    assert "max_completion_tokens" not in seen[0]
 
 
 @pytest.mark.asyncio
@@ -461,7 +461,7 @@ def test_exhausted_account_is_removed_from_current_reserve(catalog, quota):
         {"journal": 10, "simon-news": 10, "cactus-brief": 10},
     )
     day = datetime.now(UTC).date().isoformat()
-    quota.client.set(f"fr:v1:cerebras:rpd:{day}", 90)
+    quota.client.set(f"fr:v1:siliconflow:rpd:{day}", 90)
     status = router.readiness("journal")
     assert not status["ready"]
     assert status["providers"] == 3
@@ -476,9 +476,9 @@ async def test_reserve_deficit_retries_at_next_daily_quota_window(catalog, quota
         catalog,
         {"journal": 10, "simon-news": 10, "cactus-brief": 10},
     )
-    spec = next(model for model in load_models(catalog)[0] if model.provider == "cerebras")
+    spec = next(model for model in load_models(catalog)[0] if model.provider == "siliconflow")
     day = datetime.now(UTC).date().isoformat()
-    quota.client.set(f"fr:v1:cerebras:rpd:{day}", 90)
+    quota.client.set(f"fr:v1:siliconflow:rpd:{day}", 90)
     result = await router.attempt(
         {
             "messages": [{"role": "user", "content": "Fuente pública"}],
@@ -500,7 +500,7 @@ def test_exhausted_model_is_removed_from_current_reserve(catalog, quota):
         catalog,
         {"journal": 10, "simon-news": 10, "cactus-brief": 10},
     )
-    spec = next(model for model in load_models(catalog)[0] if model.provider == "cerebras")
+    spec = next(model for model in load_models(catalog)[0] if model.provider == "siliconflow")
     day = datetime.now(UTC).date().isoformat()
     quota.client.set(f"fr:v1:{spec.provider}:{spec.model}:rpd:{day}", 90)
     status = router.readiness("journal")
@@ -580,7 +580,7 @@ def test_provider_rate_limit_cools_all_models_on_same_account(catalog, quota):
 
 def test_standby_without_reviewer_does_not_satisfy_reserve(catalog, quota):
     raw = json.loads(catalog.read_text())
-    next(row for row in raw["models"] if row["provider"] == "cerebras")["stages"] = ["author"]
+    next(row for row in raw["models"] if row["provider"] == "siliconflow")["stages"] = ["author"]
     catalog.write_text(json.dumps(raw), encoding="utf-8")
     router = EditorialRouter(
         quota,
@@ -596,7 +596,7 @@ def test_standby_without_reviewer_does_not_satisfy_reserve(catalog, quota):
 
 def test_aggregator_does_not_satisfy_independent_reserve(catalog, quota):
     raw = json.loads(catalog.read_text())
-    raw["models"] = [row for row in raw["models"] if row["provider"] != "cerebras"]
+    raw["models"] = [row for row in raw["models"] if row["provider"] != "siliconflow"]
     catalog.write_text(json.dumps(raw), encoding="utf-8")
     router = EditorialRouter(
         quota,
