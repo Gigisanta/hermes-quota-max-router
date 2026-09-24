@@ -1,30 +1,13 @@
 name: lint
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
 permissions:
   contents: read
-
 jobs:
-  ruff:
-    name: ruff (strict)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install ruff
-      - run: ruff check core/ server/ scripts/ dashboard/ tests/ examples/
-      - run: ruff format --check core/ server/ scripts/ dashboard/ tests/ examples/
-
   gitleaks:
-    name: gitleaks (secret scan)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

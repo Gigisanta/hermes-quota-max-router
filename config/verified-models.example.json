@@ -1,0 +1,20 @@
+{
+  "models": [
+    {
+      "provider": "gemini",
+      "model": "gemini-3.5-flash-lite",
+      "workloads": ["journal", "simon-news", "cactus-brief"],
+      "stages": ["author", "reviewer"],
+      "context_tokens": 0,
+      "quota": {"rpm": 0, "rpd": 0, "tpm": 0, "tpd": 0, "reset_tz": "UTC"},
+      "evidence_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "evidence_checked_at": "",
+      "account_checked_at": "",
+      "no_billing": false,
+      "zero_price": false,
+      "smoke_passed": false,
+      "quality_passed": false,
+      "standby": false
+    }
+  ]
+}

@@ -1,55 +1,26 @@
 name: tests
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
 permissions:
   contents: read
-
 jobs:
-  test:
-    name: pytest (py${{ matrix.python-version }})
+  verify:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
-
+        python-version: ['3.11', '3.12']
     steps:
       - uses: actions/checkout@v6
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Ruff lint
-        run: ruff check core/ server/ scripts/ dashboard/ tests/ examples/
-
-      - name: mypy type check
-        run: mypy --ignore-missing-imports --no-strict-optional core/ server/
-
-      - name: Run tests with coverage
-        env:
-          # CI mode: use fakeredis (Redis is optional in HQMR)
-          QUOTAMAX_FAKEREDIS: "1"
-          ROUTER_LOG_LEVEL: WARNING
-        run: |
-          pytest tests/ --cov=core --cov=server --cov=dashboard --cov-report=xml --cov-report=term-missing -q
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          files: ./coverage.xml
-          flags: unittests
-          fail_ci_if_error: false
-        continue-on-error: true
+      - run: python -m pip install -e '.[dev]'
+      - run: ruff check free_router tests_v1 main.py server/app.py server/__main__.py
+      - run: ruff format --check free_router tests_v1 main.py server/app.py server/__main__.py
+      - run: mypy free_router
+      - run: pytest tests_v1 -q

@@ -21,7 +21,7 @@ repos:
     hooks:
       - id: pytest-smoke
         name: pytest (smoke, skip with SKIP=pytest-smoke)
-        entry: python -m pytest tests/ -q -x --no-header -p no:cacheprovider
+        entry: python -m pytest tests_v1/ -q -x --no-header -p no:cacheprovider
         language: system
         pass_filenames: false
         stages: [pre-push]

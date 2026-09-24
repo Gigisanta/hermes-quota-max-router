@@ -1,0 +1,298 @@
+"""Deterministic routing among account-verified, editorial-quality free models."""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
+
+from free_router.config import WORKLOADS, ModelSpec, load_models
+from free_router.provider import ProviderClient, ProviderFailure
+from free_router.quota import QuotaStore
+
+
+@dataclass(frozen=True)
+class Attempt:
+    response: dict | None
+    retry_after: int
+    reason: str
+
+
+class EditorialRouter:
+    def __init__(
+        self,
+        quota: QuotaStore,
+        provider: ProviderClient,
+        catalog_path: Path,
+        daily_peak: dict[str, int],
+    ):
+        self.quota = quota
+        self.provider = provider
+        self.catalog_path = catalog_path
+        self.daily_peak = {
+            workload: peak
+            for workload, peak in daily_peak.items()
+            if workload in WORKLOADS and type(peak) is int and peak > 0
+        }
+        self.models: list[ModelSpec] = []
+        self.rejected: dict[str, str] = {}
+        self.reload()
+
+    def reload(self) -> None:
+        self.models, self.rejected = load_models(self.catalog_path)
+
+    def _provider_cap(self, provider: str) -> tuple[int, int, int, int]:
+        rows = [m.quota for m in self.models if m.provider == provider]
+        return tuple(min(getattr(q, k) for q in rows) for k in ("rpm", "rpd", "tpm", "tpd"))
+
+    def _workload_share(self, workload: str) -> float:
+        peaks = [self.daily_peak.get(w, 0) for w in WORKLOADS]
+        if not all(peaks):
+            return 0.5 if workload == "cactus-brief" else 0.25
+        total = sum(peaks)
+        cactus_share = max(0.25, self.daily_peak["cactus-brief"] / total)
+        if workload == "cactus-brief":
+            return cactus_share
+        other_total = self.daily_peak["journal"] + self.daily_peak["simon-news"]
+        return (1 - cactus_share) * self.daily_peak[workload] / other_total
+
+    def _next_window(self, workload: str) -> int:
+        waits = []
+        try:
+            for spec in self.models:
+                if workload not in spec.workloads:
+                    continue
+                cooldown = self.quota.cooldown_remaining(spec)
+                if cooldown:
+                    waits.append(cooldown)
+                if (
+                    self.quota.remaining_daily_requests(
+                        spec,
+                        provider_rpd=self._provider_cap(spec.provider)[1],
+                        provider_tpd=self._provider_cap(spec.provider)[3],
+                        workload=workload,
+                        workload_share=self._workload_share(workload),
+                    )
+                    == 0
+                ):
+                    waits.append(self.quota.seconds_until_daily_reset(spec))
+        except RuntimeError:
+            return 60
+        return max(5, min(waits, default=300))
+
+    def readiness(self, workload: str) -> dict:
+        try:
+            eligible = [
+                m
+                for m in self.models
+                if workload in m.workloads
+                and self.quota.cooldown_remaining(m) == 0
+                and self.quota.remaining_daily_requests(
+                    m,
+                    provider_rpd=self._provider_cap(m.provider)[1],
+                    provider_tpd=self._provider_cap(m.provider)[3],
+                    workload=workload,
+                    workload_share=self._workload_share(workload),
+                )
+                > 0
+            ]
+        except RuntimeError:
+            return {
+                "ready": False,
+                "providers": 0,
+                "active": 0,
+                "standby": 0,
+                "verified_daily_requests": 0,
+                "measured_peak_requests": self.daily_peak.get(workload),
+                "reasons": ["quota_store_unavailable"],
+            }
+        # An aggregator route is extra capacity, not an independent upstream.
+        core = [m for m in eligible if m.provider != "openrouter"]
+        providers = {
+            m.provider
+            for m in core
+            if any(other.provider == m.provider and "author" in other.stages for other in core)
+            and any(other.provider == m.provider and "reviewer" in other.stages for other in core)
+        }
+        active = {m.provider for m in core if m.provider in providers and not m.standby}
+        standby = {m.provider for m in core if m.provider in providers and m.standby}
+        peak = self.daily_peak.get(workload)
+        extra = {m.provider for m in eligible if m.provider == "openrouter"}
+        try:
+            remaining = {
+                p: self.quota.remaining_daily_requests(
+                    next(m for m in eligible if m.provider == p),
+                    provider_rpd=self._provider_cap(p)[1],
+                    provider_tpd=self._provider_cap(p)[3],
+                    workload=workload,
+                    workload_share=self._workload_share(workload),
+                )
+                for p in providers | extra
+            }
+            full_remaining = {
+                p: self.quota.remaining_daily_requests(
+                    next(m for m in eligible if m.provider == p),
+                    provider_rpd=self._provider_cap(p)[1],
+                    provider_tpd=self._provider_cap(p)[3],
+                )
+                for p in providers | extra
+            }
+        except RuntimeError:
+            return {
+                "ready": False,
+                "providers": 0,
+                "active": 0,
+                "standby": 0,
+                "verified_daily_requests": 0,
+                "measured_peak_requests": self.daily_peak.get(workload),
+                "reasons": ["quota_store_unavailable"],
+            }
+        capacity = sum(remaining.values())
+        reasons = []
+        if len(providers) < 4 or len(active) < 3 or not (standby - active):
+            reasons.append("less_than_four_independent_providers")
+        if len(providers) < 2:
+            reasons.append("insufficient_author_reviewer_diversity")
+        if type(peak) is not int or peak <= 0:
+            reasons.append("missing_measured_daily_peak")
+        elif capacity < 2 * peak:
+            reasons.append("insufficient_daily_headroom")
+        all_peaks = [self.daily_peak.get(w, 0) for w in WORKLOADS]
+        if not all(v > 0 for v in all_peaks):
+            reasons.append("missing_shared_daily_peak")
+        else:
+            shared_capacity = sum(full_remaining.values())
+            if shared_capacity < 2 * sum(all_peaks):
+                reasons.append("insufficient_shared_daily_headroom")
+        return {
+            "ready": not reasons,
+            "providers": len(providers),
+            "active": len(active),
+            "standby": len(standby),
+            "verified_daily_requests": capacity,
+            "measured_peak_requests": peak,
+            "reasons": reasons,
+        }
+
+    async def attempt(
+        self,
+        request: dict,
+        *,
+        workload: str,
+        stage: str,
+        author_provider: str | None = None,
+        pilot: bool = False,
+    ) -> Attempt:
+        self.reload()  # Expired attestations stop routing without a restart.
+        if not pilot and not self.readiness(workload)["ready"]:
+            return Attempt(None, self._next_window(workload), "reserve_not_ready")
+        messages = request["messages"]
+        max_tokens = request["max_tokens"]
+        # UTF-8 byte count is a conservative token estimate for multilingual text.
+        input_tokens = max(1, sum(len(m["content"].encode("utf-8")) + 64 for m in messages))
+        candidates = [
+            m
+            for m in self.models
+            if workload in m.workloads
+            and stage in m.stages
+            and (not author_provider or m.provider != author_provider)
+            and input_tokens + max_tokens <= m.context_tokens
+        ]
+        if not candidates:
+            return Attempt(None, 300, "no_eligible_model_or_context")
+        ranked = []
+        waits: list[int] = []
+        try:
+            for m in candidates:
+                cooldown = self.quota.cooldown_remaining(m)
+                if cooldown:
+                    waits.append(cooldown)
+                    continue
+                remaining = self.quota.remaining_daily_requests(m)
+                ranked.append((m.standby, -remaining / max(1, m.quota.rpd), m.provider, m))
+        except RuntimeError:
+            return Attempt(None, 60, "quota_store_unavailable")
+        for _, _, _, spec in sorted(ranked, key=lambda x: x[:3]):
+            try:
+                reservation = self.quota.reserve(
+                    spec,
+                    workload,
+                    input_tokens,
+                    max_tokens,
+                    provider_limits=self._provider_cap(spec.provider),
+                    workload_share=self._workload_share(workload),
+                )
+            except RuntimeError:
+                return Attempt(None, 60, "quota_store_unavailable")
+            if not reservation.keys:
+                waits.append(reservation.retry_after)
+                continue
+            try:
+                result = await self.provider.complete(
+                    spec, messages, max_tokens, request["temperature"]
+                )
+            except ProviderFailure as exc:
+                try:
+                    self.quota.cool_down(
+                        spec,
+                        exc.retry_after,
+                        permanent=exc.permanent,
+                        account_wide=exc.reason == "upstream_rate_limited",
+                    )
+                except RuntimeError:
+                    return Attempt(None, 60, "quota_store_unavailable")
+                waits.append(exc.retry_after)
+                continue
+            if result["prompt_tokens"] is not None and result["completion_tokens"] is not None:
+                self.quota.reconcile(
+                    reservation,
+                    input_tokens,
+                    max_tokens,
+                    result["prompt_tokens"],
+                    result["completion_tokens"],
+                )
+            prompt = (
+                result["prompt_tokens"] if result["prompt_tokens"] is not None else input_tokens
+            )
+            completion = (
+                result["completion_tokens"]
+                if result["completion_tokens"] is not None
+                else max_tokens
+            )
+            response = {
+                "id": "chatcmpl-" + uuid4().hex,
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": spec.id,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": result["content"]},
+                        "finish_reason": result["finish_reason"],
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": prompt,
+                    "completion_tokens": completion,
+                    "total_tokens": prompt + completion,
+                },
+                "router": {
+                    "provider": spec.provider,
+                    "model": spec.model,
+                    "upstream_model": result["actual_model"],
+                    "usage_estimated": result["prompt_tokens"] is None,
+                },
+            }
+            return Attempt(response, 0, "ok")
+        return Attempt(None, max(5, min(waits, default=60)), "all_free_routes_unavailable")
+
+    def status(self) -> dict:
+        self.reload()
+        return {
+            "workloads": {w: self.readiness(w) for w in ("journal", "simon-news", "cactus-brief")},
+            "verified_models": len(self.models),
+            "rejected": self.rejected,
+            "checked_at": datetime.now(UTC).isoformat(),
+        }

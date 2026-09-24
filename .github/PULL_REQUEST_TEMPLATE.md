@@ -9,16 +9,15 @@ discussion where it was designed.
 
 ## How was it tested?
 
-- [ ] `pytest tests/ -q` passes locally
+- [ ] `make lint type-check test` passes locally
 - [ ] Added new tests (file + names)
-- [ ] Manually verified against a live free model (which one?)
+- [ ] If a provider was admitted, recorded account quota, price, access and editorial evaluation
 
 ## Checklist
 
 - [ ] Code follows the existing style (ruff + mypy clean)
 - [ ] No new `print()` or `sys.path` hacks
-- [ ] No new `except Exception` (use specific exceptions)
-- [ ] Added docstrings to new public functions
-- [ ] Updated `CHANGELOG.md` under `[Unreleased]`
-- [ ] Updated `docs/ARCHITECTURE.md` if it changes the module map
+- [ ] Queue and privacy behavior remain fail-closed
+- [ ] No paid, local GPU, or simulated fallback was introduced
+- [ ] Updated `README.md` and `CHANGELOG.md` when behavior changed
 - [ ] Self-reviewed the diff before requesting review
