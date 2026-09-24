@@ -184,18 +184,22 @@ def test_daily_requests_count_queued_jobs_once_and_separate_utc_days(tmp_path):
     repeated_id, inserted = queue.begin("journal", "author", {"body": "Dato público"}, "same")
     assert not inserted and repeated_id == job_id
     queue.reschedule(job_id, 5)
-    queue.enqueue("simon-news", "author", {"body": "Otro dato público"}, "other", 5)
+    today_id = queue.enqueue("simon-news", "author", {"body": "Otro dato público"}, "other", 5)
     future_id = queue.enqueue("cactus-brief", "author", {"body": "Dato futuro"}, "future", 5)
-    yesterday = datetime.now(UTC).date().toordinal() - 1
-    yesterday_date = datetime.fromordinal(yesterday).replace(tzinfo=UTC)
+    today = datetime.now(UTC).date()
+    midnight = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
     with queue._connect() as conn:
         conn.execute(
             "UPDATE jobs SET created_at=? WHERE id=?",
-            (yesterday_date.timestamp(), job_id),
+            ((midnight - timedelta(days=1)).timestamp(), job_id),
         )
         conn.execute(
             "UPDATE jobs SET created_at=? WHERE id=?",
-            ((datetime.now(UTC) + timedelta(days=8)).timestamp(), future_id),
+            (midnight.timestamp(), today_id),
+        )
+        conn.execute(
+            "UPDATE jobs SET created_at=? WHERE id=?",
+            ((midnight + timedelta(days=8)).timestamp(), future_id),
         )
     rows = queue.daily_request_counts(days=7)
     assert sum(row["requests"] for row in rows) == 2
