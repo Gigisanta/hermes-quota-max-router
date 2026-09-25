@@ -21,6 +21,33 @@ reserva. Si alguna desaparece, cierra todas las rutas remotas.
 | Mistral Free | La cuenta Google de MaatWork ya es reconocida por AI Studio. Su [modo Free](https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key) permite API sin tarjeta y su [plan actual](https://mistral.ai/pricing/) anuncia USD 10/mes de créditos, consumidos contra precios por modelo. [Mistral lo destina a evaluación y prototipado](https://help.mistral.ai/en/articles/698531-why-am-i-hitting-api-rate-limits-and-how-do-i-increase-them). La consola exige aceptar sus términos antes de mostrar límites. | Consentimiento pendiente; no cuenta como tarifa cero por modelo ni como reserva productiva sostenida. |
 | OpenRouter `:free` | Sus [términos, §7(4)](https://openrouter.ai/terms) prohíben usar el servicio para desarrollar uno competidor. | Excluido del registro y de la auditoría automática; no se abrió cuenta. Sólo reconsiderar con autorización escrita específica del operador. |
 
+## Comparación sintética de revisión de Journal
+
+El 25 de septiembre se ejecutó el mismo prompt de revisor de Journal contra los
+60 casos ficticios de `bin/newsblog/frozen_cases.json` (SHA-256
+`c5ba0b687443437f8fd73ba19d734a3af00a955924a6a80c3e4392bdbee0c65e`).
+El cliente de evaluación fija modelo y endpoint, no permite fallback y sólo
+guarda ID de caso, decisión, error, latencia y tokens en `var/evals/` local.
+
+| Modelo | Casos correctos | Errores | Mediana por llamada | Tokens observados |
+| --- | ---: | ---: | ---: | ---: |
+| Gemini `gemini-3.5-flash-lite` | 60/60 | 0 | 1,29 s | 9.053 entrada + 1.972 salida |
+| SimpleLLM `gemma-4-E4B` | 57/60 totales; 57/57 juzgados correctos | 3 respuestas incompletas con techo de 512 tokens | 7,61 s | 9.399 entrada + 24.010 salida en las 57 respuestas completas |
+
+Los tres casos incompletos (`ia-004`, `tech-008`, `ia-007`) se repitieron por
+separado con un techo de 1.024 tokens: **3/3 correctos, 0 errores**, 494 tokens
+de entrada y 1.854 de salida. Entre ambas corridas, los 60 casos obtuvieron un
+veredicto correcto, pero el modelo necesitó más margen de salida en tres y aún
+no se probó el flujo completo de artículos reales. El evaluador comprueba las
+cuotas disponibles de SimpleLLM antes de cada llamada y suspende la corrida si
+no puede acreditar capacidad gratuita. Después de la repetición, `/v1/usage`
+seguía mostrando saldo **0 SC** y gasto total **0 SC**. La cuota horaria tenía
+32 solicitudes y 10.720 tokens disponibles; Gemini permanece en proyecto Free
+sin facturación configurada.
+Estos casos sintéticos prueban fidelidad de veredictos simples; no son borradores
+reales, ni la calibración de Simón, ni los controles de cifras de Cactus. Ningún
+modelo se promueve por esta medición aislada.
+
 [Z.ai](https://chat.z.ai/legal-agreement/terms-of-service)
 restringe noticias y finanzas; [Mistral Free](https://docs.mistral.ai/admin/billing-usage/subscriptions)
 incluye créditos contra tarifas por modelo. Tampoco cuentan para esta política
@@ -48,7 +75,7 @@ da un crédito diario contra modelos con [precio por token](https://www.aionlabs
 Son límites de gasto incluidos, no modelos de tarifa cero. [ModelScope
 API-Inference](https://community.modelscope.cn/675262372db35d1195183bdb.html)
 advierte expresamente no usar su beta gratuita para producción. [Hetzner
-Experiments](https://docs.hetzner.com/general/company-and-policy/experiments/openclaw/)
+Experiments](https://docs.hetzner.com/general/company-and-policy/experiments/inference/)
 es gratis sólo durante su fase experimental y desaconseja producción.
 [Vikasit Nova](https://vikasit.ai/inference) anuncia 2 millones de tokens
 gratuitos diarios y acceso por GitHub, pero su propia página lo presenta para
@@ -72,6 +99,14 @@ exige un proyecto con medio de pago para claves de API; la modalidad anónima
 tiene 2 RPM por IP y modelo, pero no acredita precio cero ni cuota diaria
 garantizada. [Pollinations](https://enter.pollinations.ai/terms) consume Pollen
 por petición; sus grants y recompensas gratuitos no son una tarifa cero estable.
+
+[Requesty Free](https://www.requesty.ai/pricing) publica modelos a precio cero
+y 200 solicitudes diarias sin tarjeta. Sin embargo, sus
+[términos, §10(11)](https://www.requesty.ai/terms) prohíben acceder al servicio
+con el fin de desarrollar uno competidor. Este proyecto construye un router
+compartido, así que no se abrió cuenta ni se integra su API sin permiso escrito
+de Requesty. La lista gratuita de un agregador tampoco equivale a operadores
+independientes: varios modelos pueden depender del mismo proveedor subyacente.
 
 ## Próxima comprobación necesaria
 

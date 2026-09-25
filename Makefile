@@ -7,8 +7,8 @@ install-dev:
 test:
 	$(PYTHON) -m pytest tests_v1 -q
 lint:
-	$(PYTHON) -m ruff check free_router tests_v1 main.py server/app.py server/__main__.py
-	$(PYTHON) -m ruff format --check free_router tests_v1 main.py server/app.py server/__main__.py
+	$(PYTHON) -m ruff check free_router tests_v1 scripts/evaluate_free_reviewer.py main.py server/app.py server/__main__.py
+	$(PYTHON) -m ruff format --check free_router tests_v1 scripts/evaluate_free_reviewer.py main.py server/app.py server/__main__.py
 type-check:
 	$(PYTHON) -m mypy free_router
 serve:

@@ -18,6 +18,29 @@ El router y los tres adaptadores arrancan desactivados. Este piloto dura **siete
 | Simón | 50 temas reales distintos de la cola de ciencia, sin selección favorable | Evidencia y revisión clínica humana; cero errores graves, afirmaciones sustentadas y comparación a ciegas conforme al gate de Simón |
 | Cactus | Briefs históricos con fixtures de mercado y cotizaciones vigentes de prueba | Cifras, procedencia y vigencia; ninguna omisión de historias/temas por el revisor; fallback determinista sólo tras su QA |
 
+Para la comparación sintética del revisor de Journal, cargá la clave verificada
+en el entorno del proceso y ejecutá, desde este repo:
+
+```sh
+.venv/bin/python scripts/evaluate_free_reviewer.py \
+  --provider gemini \
+  --cases /Users/gigi/HerMaatOS/bin/newsblog/frozen_cases.json \
+  --output var/evals/journal-gemini-YYYY-MM-DD.json
+```
+
+`--provider simplellm` usa su modelo gratuito exacto. El script fija el hash de
+los 60 casos sintéticos, conserva un checkpoint sin contenido ni claves, y
+rechaza reutilizar un reporte sin `--resume`. Esta opción vuelve a intentar los
+casos con error y sustituye su fila anterior. Para investigar una respuesta
+incompleta, `--case-id <ID>` selecciona únicamente ese caso y permite
+`--max-tokens 1024` en otro reporte. SimpleLLM consulta su cuota vigente antes
+de cada petición y usa un lock local por cuenta entre evaluaciones. Otras
+aplicaciones de la misma cuenta podrían consumir cuota entre la consulta y la
+petición; esta comparación se ejecuta sin tráfico productivo concurrente. Sus
+resultados son sólo un filtro
+de candidatos: también hacen falta autor, citas, esquemas, artículos reales,
+calibración por carga y el período completo de siete días.
+
 Guardá por día y carga: fecha UTC, cantidad de casos, aprobados/rechazados, errores editoriales, solicitudes en cola/reanudadas, proveedor/modelo efectivos, segundos de GPU del flujo actual y del flujo con router, y monto facturado en cada cuenta. No guardes prompts, respuestas, secretos ni datos personales en métricas del router. Los artefactos editoriales del proyecto permanecen bajo sus propios controles.
 
 ## Criterio de salida
