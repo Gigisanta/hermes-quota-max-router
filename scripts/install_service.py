@@ -47,7 +47,7 @@ def _atomic_private_write(path: Path, content: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _create_private_env(state: Path) -> None:
+def _create_private_env(state: Path, *, initial_install: bool = True) -> None:
     SECRET_ENV.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(SECRET_ENV.parent, 0o700)
     defaults = {
@@ -62,6 +62,11 @@ def _create_private_env(state: Path) -> None:
     }
     env_existed = SECRET_ENV.exists()
     existing = load_private_env(SECRET_ENV) if env_existed else {}
+    if initial_install and (
+        existing.get("ROUTER_PRODUCTION_WORKLOADS", "").strip()
+        or existing.get("ROUTER_PILOT_MODE") == "1"
+    ):
+        raise RuntimeError("preexisting_active_admission_requires_review")
     for key in ("ROUTER_QUEUE_DB", "ROUTER_VERIFIED_MODELS", "ROUTER_DAILY_PEAK_FILE"):
         value = existing.get(key)
         if value and not Path(value).is_absolute():
@@ -180,9 +185,6 @@ def install() -> None:
     for path in (SERVICE_ROOT, state, logs, releases):
         path.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(path, 0o700)
-    _create_private_env(state)
-    release = _install_release(releases, commit)
-    PLIST.parent.mkdir(parents=True, exist_ok=True)
     previous = PLIST.read_bytes() if PLIST.exists() else None
     domain = f"gui/{os.getuid()}"
     loaded = (
@@ -191,6 +193,9 @@ def install() -> None:
     )
     if loaded and previous is None:
         raise RuntimeError("loaded_service_missing_installed_plist")
+    _create_private_env(state, initial_install=not loaded)
+    release = _install_release(releases, commit)
+    PLIST.parent.mkdir(parents=True, exist_ok=True)
     with socket.socket() as probe:
         probe.settimeout(1)
         port_in_use = probe.connect_ex(("127.0.0.1", 8123)) == 0

@@ -105,6 +105,22 @@ def test_install_rejects_legacy_relative_state_path(tmp_path: Path, monkeypatch)
     assert load_private_env(env_file)["ROUTER_QUEUE_DB"] == "var/queue.sqlite3"
 
 
+def test_first_install_rejects_preexisting_active_admission(tmp_path: Path, monkeypatch) -> None:
+    env_file = tmp_path / "secrets" / ".env"
+    env_file.parent.mkdir()
+    _private_file(env_file, "ROUTER_PRODUCTION_WORKLOADS=journal\nROUTER_PILOT_MODE=1\n")
+    monkeypatch.setattr(install_service, "SECRET_ENV", env_file)
+    before = env_file.read_bytes()
+    with pytest.raises(RuntimeError, match="preexisting_active_admission_requires_review"):
+        install_service._create_private_env(tmp_path / "state", initial_install=True)
+    assert env_file.read_bytes() == before
+
+    install_service._create_private_env(tmp_path / "state", initial_install=False)
+    values = load_private_env(env_file)
+    assert values["ROUTER_PRODUCTION_WORKLOADS"] == "journal"
+    assert values["ROUTER_PILOT_MODE"] == "1"
+
+
 def test_install_health_rejects_nonobject_json(monkeypatch) -> None:
     class Opener:
         def open(self, *_args, **_kwargs):
