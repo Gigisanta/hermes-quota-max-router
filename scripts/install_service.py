@@ -171,6 +171,26 @@ def _healthy(commit: str) -> bool:
         return False
 
 
+def _port_in_use() -> bool:
+    with socket.socket() as probe:
+        probe.settimeout(1)
+        return probe.connect_ex(("127.0.0.1", 8123)) == 0
+
+
+def _wait_stopped(domain: str) -> None:
+    for _ in range(100):
+        job_loaded = (
+            subprocess.run(
+                ["launchctl", "print", f"{domain}/{LABEL}"], capture_output=True
+            ).returncode
+            == 0
+        )
+        if not job_loaded and not _port_in_use():
+            return
+        time.sleep(0.1)
+    raise RuntimeError("previous_service_did_not_stop")
+
+
 def install() -> None:
     if sys.version_info < (3, 11, 4):  # noqa: UP036 - tar data filter needs Python 3.11.4+
         raise RuntimeError("python_3_11_4_required")
@@ -196,17 +216,15 @@ def install() -> None:
     _create_private_env(state, initial_install=not loaded)
     release = _install_release(releases, commit)
     PLIST.parent.mkdir(parents=True, exist_ok=True)
-    with socket.socket() as probe:
-        probe.settimeout(1)
-        port_in_use = probe.connect_ex(("127.0.0.1", 8123)) == 0
+    port_in_use = _port_in_use()
     if port_in_use and not loaded:
         raise RuntimeError("port_8123_in_use_by_another_service")
     try:
         _atomic_private_write(PLIST, _plist(release, logs))
         subprocess.run(["launchctl", "bootout", f"{domain}/{LABEL}"], capture_output=True)
+        _wait_stopped(domain)
         _run("launchctl", "bootstrap", domain, str(PLIST))
-        _run("launchctl", "kickstart", "-k", f"{domain}/{LABEL}")
-        for _ in range(30):
+        for _ in range(60):
             if _healthy(commit):
                 break
             time.sleep(1)
@@ -214,13 +232,13 @@ def install() -> None:
             raise RuntimeError("service_failed_health_gate")
     except Exception:
         subprocess.run(["launchctl", "bootout", f"{domain}/{LABEL}"], capture_output=True)
+        _wait_stopped(domain)
         if previous is None:
             PLIST.unlink(missing_ok=True)
         else:
             _atomic_private_write(PLIST, previous)
             if loaded:
                 _run("launchctl", "bootstrap", domain, str(PLIST))
-                _run("launchctl", "kickstart", "-k", f"{domain}/{LABEL}")
         raise
     print(f"installed {LABEL} release={commit[:12]} on 127.0.0.1:8123")
 
