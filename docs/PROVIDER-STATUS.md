@@ -61,8 +61,9 @@ del `SYSTEM` enumera `kind`, `title`, `standfirst`, `sections` y `tags`, pero
 omite `schema`, lo que puede explicar el fallo. La prueba se repitió con el
 prompt inicial exacto del flujo. Después de agregar ese campo al ejemplo en el
 PR de Journal, ambos modelos devolvieron un documento válido en una repetición
-del mismo caso. Esto comprueba el formato en un caso público, sin evaluación
-editorial completa de los hechos ni aprobación de autor. **Ninguno está
+del mismo caso. La corrección quedó en el prompt de usuario para conservar los
+digests de checkpoints existentes. Esto comprueba el formato en un caso público,
+sin evaluación editorial completa de los hechos ni aprobación de autor. **Ninguno está
 aprobado como autor.** Hay que completar los gates de Journal y ampliar la
 muestra antes de considerar cualquier promoción.
 
