@@ -789,6 +789,29 @@ def test_novita_temporary_or_paid_models_cannot_join_permanent_reserve(catalog, 
         ModelSpec.parse(row)
 
 
+@pytest.mark.parametrize(
+    "model",
+    [
+        "@cf/moonshotai/kimi-k2.6",
+        "@cf/moonshotai/kimi-k2.7-code",
+        "@cf/zai-org/glm-5.2",
+        "@cf/zai-org/glm-5.3",
+        "@cf/zai-org/glm-5.3-flash",
+        "@cf/deepseek-ai/deepseek-v4-flash-0731",
+        "@cf/deepseek-ai/deepseek-v4-pro-0813",
+    ],
+)
+def test_cloudflare_paid_only_models_cannot_join_free_reserve(catalog, model):
+    row = next(
+        item
+        for item in json.loads(catalog.read_text())["models"]
+        if item["provider"] == "cloudflare"
+    )
+    row["model"] = model
+    with pytest.raises(ValueError, match="model_not_permanently_free"):
+        ModelSpec.parse(row)
+
+
 def test_cloudflare_neurons_must_share_utc_account_window(catalog):
     raw = json.loads(catalog.read_text())["models"]
     cloudflare = next(row for row in raw if row["provider"] == "cloudflare")

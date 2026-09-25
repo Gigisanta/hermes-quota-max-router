@@ -33,6 +33,15 @@ NON_PERMANENT_OR_PAID_MODELS = {
     ("novita", "inclusionai/ling-3.0-flash-fin"),
     ("novita", "inclusionai/ling-3.0-flash-sante"),
     ("novita", "inclusionai/ling-3.0-flash-vl"),
+    # Workers AI documents these models as requiring Workers Paid or prepaid
+    # AI Gateway credits. They cannot use the 10,000-Neuron Free allocation.
+    ("cloudflare", "@cf/moonshotai/kimi-k2.6"),
+    ("cloudflare", "@cf/moonshotai/kimi-k2.7-code"),
+    ("cloudflare", "@cf/zai-org/glm-5.2"),
+    ("cloudflare", "@cf/zai-org/glm-5.3"),
+    ("cloudflare", "@cf/zai-org/glm-5.3-flash"),
+    ("cloudflare", "@cf/deepseek-ai/deepseek-v4-flash-0731"),
+    ("cloudflare", "@cf/deepseek-ai/deepseek-v4-pro-0813"),
 }
 MAX_EVIDENCE_AGE = timedelta(days=7)
 
