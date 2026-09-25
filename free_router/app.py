@@ -113,7 +113,7 @@ def build_app(
             socket_timeout=2,
         )
         quota = QuotaStore(client)
-    provider = provider or ProviderClient()
+    provider = provider or ProviderClient(quota=quota)
     queue = queue or JobQueue(Path(os.getenv("ROUTER_QUEUE_DB", "var/queue.sqlite3")))
     router = EditorialRouter(
         quota,

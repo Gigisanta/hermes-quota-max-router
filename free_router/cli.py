@@ -37,7 +37,7 @@ def main() -> None:
     if args.command == "audit":
 
         async def run_audit() -> dict:
-            provider = ProviderClient()
+            provider = ProviderClient(quota=quota)
             try:
                 return await audit_all(models, quota, provider)
             finally:
@@ -55,7 +55,7 @@ def main() -> None:
         peak = {}
     router = EditorialRouter(
         quota,
-        ProviderClient(),
+        ProviderClient(quota=quota),
         Path(os.getenv("ROUTER_VERIFIED_MODELS", "var/verified-models.json")),
         peak,
     )

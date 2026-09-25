@@ -259,7 +259,7 @@ def test_audit_cli_runs_catalog_and_access_audits_without_printing_credentials(
 
     monkeypatch.setattr(cli.redis, "Redis", RedisFactory)
     monkeypatch.setattr(cli, "load_models", lambda: ([], {}))
-    monkeypatch.setattr(cli, "ProviderClient", lambda: provider)
+    monkeypatch.setattr(cli, "ProviderClient", lambda **_kwargs: provider)
     monkeypatch.setattr(cli, "audit_all", fake_audit_all)
     monkeypatch.setattr(sys, "argv", ["quotamax", "audit"])
 

@@ -135,6 +135,7 @@ class EditorialRouter:
                 if workload in m.workloads
                 and (planned_tokens is None or planned_tokens <= m.context_tokens)
                 and self.quota.cooldown_remaining(m) == 0
+                and (m.provider != "simplellm" or self.quota.provider_slot_available(m.provider))
                 and self.quota.remaining_hourly_requests(
                     m,
                     provider_rph=self._provider_cap(m.provider)[4],
@@ -294,6 +295,9 @@ class EditorialRouter:
                 if cooldown:
                     waits.append(cooldown)
                     continue
+                if m.provider == "simplellm" and not self.quota.provider_slot_available(m.provider):
+                    waits.append(5)
+                    continue
                 limits = self._provider_cap(m.provider)
                 if (
                     self.quota.remaining_hourly_requests(
@@ -337,6 +341,13 @@ class EditorialRouter:
                     spec, messages, max_tokens, request["temperature"]
                 )
             except ProviderFailure as exc:
+                if exc.reason == "provider_concurrency_busy":
+                    try:
+                        self.quota.refund_unsent(reservation)
+                    except RuntimeError:
+                        return Attempt(None, 60, "quota_store_unavailable")
+                    waits.append(5)
+                    continue
                 try:
                     self.quota.cool_down(
                         spec,

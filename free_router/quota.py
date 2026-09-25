@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import redis
@@ -27,11 +28,22 @@ return 0
 """
 _ADJUST = """
 for i=1,#KEYS do
-  local current=tonumber(redis.call('GET',KEYS[i]) or '0')
-  local delta=tonumber(ARGV[i])
-  redis.call('SET',KEYS[i],math.max(0,current+delta),'KEEPTTL')
+  if redis.call('EXISTS',KEYS[i])==1 then
+    local current=tonumber(redis.call('GET',KEYS[i]) or '0')
+    local delta=tonumber(ARGV[i])
+    local updated=math.max(0,current+delta)
+    if updated==0 then
+      redis.call('DEL',KEYS[i])
+    else
+      redis.call('SET',KEYS[i],updated,'KEEPTTL')
+    end
+  end
 end
 return 1
+"""
+_RELEASE_SLOT = """
+if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end
+return 0
 """
 
 
@@ -92,6 +104,32 @@ class QuotaStore:
     def _require_healthy(self) -> None:
         if not self.healthy():
             raise RuntimeError("quota_store_unavailable")
+
+    def provider_slot_available(self, provider: str) -> bool:
+        """A conservative single-flight guard for providers without a verified slot count."""
+        self._require_healthy()
+        try:
+            return self.client.exists(f"fr:v1:inflight:{provider}") == 0
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+
+    def acquire_provider_slot(self, provider: str) -> str | None:
+        """Acquire one cross-process inference slot, released by token or lease expiry."""
+        self._require_healthy()
+        token = uuid4().hex
+        try:
+            acquired = self.client.set(f"fr:v1:inflight:{provider}", token, nx=True, ex=180)
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+        self._require_healthy()
+        return token if acquired else None
+
+    def release_provider_slot(self, provider: str, token: str) -> None:
+        """Never release a later caller's slot if our lease has expired."""
+        try:
+            self.client.eval(_RELEASE_SLOT, 1, f"fr:v1:inflight:{provider}", token)
+        except redis.RedisError:
+            pass  # Lease expiry closes the slot if Redis disappears mid-request.
 
     def production_activated(self, workload: str) -> bool:
         """Read the durable record of a workload's first four-provider admission."""
@@ -238,6 +276,22 @@ class QuotaStore:
             except redis.RedisError:
                 # Keep the larger reservation if Redis is unavailable.
                 pass
+
+    def refund_unsent(self, reservation: Reservation) -> None:
+        """Undo a reservation only when the provider confirmed no request was sent."""
+        if not reservation.keys:
+            return
+        self._require_healthy()
+        try:
+            self.client.eval(
+                _ADJUST,
+                len(reservation.keys),
+                *reservation.keys,
+                *(-cost for cost in reservation.costs),
+            )
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+        self._require_healthy()
 
     def remaining_daily_requests(
         self,

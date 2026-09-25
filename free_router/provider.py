@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -10,6 +11,7 @@ from email.utils import parsedate_to_datetime
 import httpx
 
 from free_router.config import ModelSpec
+from free_router.quota import QuotaStore
 
 
 @dataclass(frozen=True)
@@ -20,10 +22,11 @@ class ProviderFailure(Exception):
 
 
 class ProviderClient:
-    def __init__(self, client: httpx.AsyncClient | None = None):
+    def __init__(self, client: httpx.AsyncClient | None = None, *, quota: QuotaStore | None = None):
         self.client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(90, connect=10), trust_env=False
         )
+        self.quota = quota
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -41,14 +44,33 @@ class ProviderClient:
             "stream": False,
         }
         body["max_tokens"] = max_tokens
+        slot_token = None
+        if spec.provider == "simplellm":
+            if self.quota is None:
+                raise ProviderFailure("quota_store_unavailable", 60)
+            try:
+                slot_token = self.quota.acquire_provider_slot(spec.provider)
+            except RuntimeError as exc:
+                raise ProviderFailure("quota_store_unavailable", 60) from exc
+            if slot_token is None:
+                raise ProviderFailure("provider_concurrency_busy", 5)
         try:
-            response = await self.client.post(
+            request = self.client.post(
                 spec.api_base.rstrip("/") + "/chat/completions",
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                 json=body,
             )
-        except httpx.HTTPError as exc:
+            response = (
+                await asyncio.wait_for(request, timeout=120)
+                if spec.provider == "simplellm"
+                else await request
+            )
+        except (httpx.HTTPError, TimeoutError) as exc:
             raise ProviderFailure("upstream_network_error", 60) from exc
+        finally:
+            if slot_token is not None:
+                assert self.quota is not None
+                self.quota.release_provider_slot(spec.provider, slot_token)
         if response.status_code == 429:
             retry_after = response.headers.get("retry-after", "60")
             try:

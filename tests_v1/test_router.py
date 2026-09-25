@@ -419,7 +419,7 @@ async def test_siliconflow_uses_free_model_compatible_chat_endpoint(catalog, mon
 
 @pytest.mark.asyncio
 async def test_simplellm_candidate_requires_own_key_and_uses_its_documented_endpoint(
-    catalog, monkeypatch
+    catalog, monkeypatch, quota
 ):
     raw = json.loads(catalog.read_text())["models"][0]
     raw.update(
@@ -453,11 +453,89 @@ async def test_simplellm_candidate_requires_own_key_and_uses_its_documented_endp
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await ProviderClient(client).complete(
+        result = await ProviderClient(client, quota=quota).complete(
             spec, [{"role": "user", "content": "Texto público"}], 123, 0.3
         )
     assert result["content"] == "ok"
     assert seen == ["https://api.simplellm.eu/v1/chat/completions"]
+
+
+@pytest.mark.asyncio
+async def test_simplellm_single_flight_is_shared_and_unsent_call_is_rejected(
+    catalog, monkeypatch, quota
+):
+    raw = json.loads(catalog.read_text(encoding="utf-8"))["models"][0]
+    raw.update(
+        provider="simplellm",
+        model="gemma-4-E4B",
+        evidence_url="https://simplellm.eu/docs/models.html",
+    )
+    raw["quota"].update(rph=100, tph=100000)
+    monkeypatch.setenv("SIMPLELLM_API_KEY", "test-key")
+    spec = ModelSpec.parse(raw)
+    sent = []
+
+    def handler(request):
+        sent.append(str(request.url))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "model": spec.model,
+            },
+        )
+
+    held = quota.acquire_provider_slot("simplellm")
+    assert held is not None
+    assert quota.acquire_provider_slot("simplellm") is None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = ProviderClient(client, quota=quota)
+        with pytest.raises(ProviderFailure, match="provider_concurrency_busy"):
+            await provider.complete(spec, [{"role": "user", "content": "Texto público"}], 20, 0.0)
+        assert sent == []
+        quota.release_provider_slot("simplellm", "wrong-owner")
+        assert not quota.provider_slot_available("simplellm")
+        quota.release_provider_slot("simplellm", held)
+        assert quota.provider_slot_available("simplellm")
+        assert (
+            await provider.complete(spec, [{"role": "user", "content": "Texto público"}], 20, 0.0)
+        )["content"] == "ok"
+    assert len(sent) == 1
+    assert quota.provider_slot_available("simplellm")
+
+
+@pytest.mark.asyncio
+async def test_concurrency_race_refunds_unsent_simplellm_reservation(catalog, monkeypatch, quota):
+    raw = json.loads(catalog.read_text(encoding="utf-8"))["models"][0]
+    raw.update(
+        provider="simplellm",
+        model="gemma-4-E4B",
+        evidence_url="https://simplellm.eu/docs/models.html",
+    )
+    raw["quota"].update(rph=100, tph=100000)
+    catalog.write_text(json.dumps({"models": [raw]}), encoding="utf-8")
+    monkeypatch.setenv("SIMPLELLM_API_KEY", "test-key")
+
+    class BusyProvider:
+        async def complete(self, *_args):
+            raise ProviderFailure("provider_concurrency_busy", 5)
+
+    router = EditorialRouter(quota, BusyProvider(), catalog, {}, production_workloads=())
+    outcome = await router.attempt(
+        {
+            "messages": [{"role": "user", "content": "Texto público"}],
+            "max_tokens": 100,
+            "temperature": 0.0,
+        },
+        workload="journal",
+        stage="author",
+        pilot=True,
+    )
+    assert outcome.response is None
+    day = datetime.now(UTC).date().isoformat()
+    assert int(quota.client.get(f"fr:v1:simplellm:rpd:{day}") or 0) == 0
+    assert int(quota.client.get(f"fr:v1:simplellm:tpd:{day}") or 0) == 0
+    assert quota.client.exists(f"fr:v1:simplellm:rpd:{day}") == 0
 
 
 def test_simplellm_hourly_account_quota_is_atomic_and_removes_reserve(catalog, quota, monkeypatch):

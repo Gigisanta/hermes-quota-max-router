@@ -201,6 +201,14 @@ async def audit_access(
         try:
             result = await provider.complete(spec, messages, ACCESS_AUDIT_OUTPUT_TOKENS, 0.0)
         except ProviderFailure as exc:
+            if exc.reason == "provider_concurrency_busy":
+                try:
+                    quota.refund_unsent(reservation)
+                    entry.update(status="skipped", reason="provider_concurrency_busy")
+                except RuntimeError:
+                    entry.update(status="blocked", reason="quota_store_unavailable")
+                report["models"].append(entry)
+                continue
             try:
                 quota.cool_down(
                     spec,
