@@ -418,6 +418,46 @@ async def test_siliconflow_uses_free_model_compatible_chat_endpoint(catalog, mon
 
 
 @pytest.mark.asyncio
+async def test_simplellm_candidate_requires_own_key_and_uses_its_documented_endpoint(
+    catalog, monkeypatch
+):
+    raw = json.loads(catalog.read_text())["models"][0]
+    raw.update(
+        provider="simplellm",
+        model="gemma-4-E4B",
+        evidence_url="https://simplellm.eu/docs/models.html",
+    )
+    monkeypatch.delenv("SIMPLELLM_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="missing_provider_key"):
+        ModelSpec.parse(raw)
+
+    monkeypatch.setenv("SIMPLELLM_API_KEY", "test-key")
+    raw["quality_passed"] = False
+    with pytest.raises(ValueError, match="unverified_free_model"):
+        ModelSpec.parse(raw)
+    raw["quality_passed"] = True
+    spec = ModelSpec.parse(raw)
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "model": spec.model,
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await ProviderClient(client).complete(
+            spec, [{"role": "user", "content": "Texto público"}], 123, 0.3
+        )
+    assert result["content"] == "ok"
+    assert seen == ["https://api.simplellm.eu/v1/chat/completions"]
+
+
+@pytest.mark.asyncio
 async def test_unverified_effective_model_or_missing_finish_reason_never_succeeds(
     catalog, monkeypatch
 ):

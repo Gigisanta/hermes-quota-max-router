@@ -27,6 +27,12 @@ PROVIDERS = {
         "SILICONFLOW_API_KEY",
         "siliconflow.cn",
     ),
+    "simplellm": (
+        "https://api.simplellm.eu/v1",
+        "openai",
+        "SIMPLELLM_API_KEY",
+        "simplellm.eu",
+    ),
     "cloudflare": ("", "cloudflare", "CLOUDFLARE_API_TOKEN", "developers.cloudflare.com"),
 }
 NON_PERMANENT_OR_PAID_MODELS = {
