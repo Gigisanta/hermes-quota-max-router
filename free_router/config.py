@@ -58,6 +58,8 @@ class Quota:
     rpd: int
     tpm: int
     tpd: int
+    rph: int | None = None
+    tph: int | None = None
     daily_neurons: int | None = None
     neurons_per_million_input: int | None = None
     neurons_per_million_output: int | None = None
@@ -70,6 +72,11 @@ class Quota:
         vals = [raw.get(k) for k in ("rpm", "rpd", "tpm", "tpd")]
         if any(not isinstance(v, int) or isinstance(v, bool) or v <= 0 for v in vals):
             raise ValueError("unverified_quota")
+        hourly = [raw.get("rph"), raw.get("tph")]
+        if any(value is not None for value in hourly) and any(
+            type(value) is not int or value <= 0 for value in hourly
+        ):
+            raise ValueError("unverified_hourly_quota")
         return cls(**raw)
 
 
@@ -143,6 +150,8 @@ class ModelSpec:
         if type(context) is not int or context < 1024:
             raise ValueError("unverified_context")
         quota = Quota.parse(raw.get("quota", {}))
+        if provider == "simplellm" and (quota.rph is None or quota.tph is None):
+            raise ValueError("missing_simplellm_hourly_quota")
         try:
             ZoneInfo(quota.reset_tz)
         except (KeyError, TypeError) as exc:

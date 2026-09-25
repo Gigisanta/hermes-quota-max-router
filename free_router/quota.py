@@ -42,12 +42,21 @@ class Reservation:
     retry_after: int = 0
 
 
+ProviderLimits = tuple[int, int, int, int] | tuple[int, int, int, int, int | None, int | None]
+
+
 def _day_window(now: datetime, tz: str) -> tuple[str, int]:
     local = now.astimezone(ZoneInfo(tz))
     next_day = datetime.combine(
         local.date() + timedelta(days=1), datetime.min.time(), tzinfo=ZoneInfo(tz)
     )
     return local.date().isoformat(), max(1, math.ceil(next_day.timestamp() - now.timestamp()))
+
+
+def _hour_window(now: datetime) -> tuple[int, int]:
+    """Use one shared UTC hour bucket for a provider account and its models."""
+    second = int(now.timestamp())
+    return second // 3600, max(1, 3601 - second % 3600)
 
 
 class QuotaStore:
@@ -119,7 +128,7 @@ class QuotaStore:
         input_tokens: int,
         output_tokens: int,
         *,
-        provider_limits: tuple[int, int, int, int] | None = None,
+        provider_limits: ProviderLimits | None = None,
         workload_share: float | None = None,
         now: datetime | None = None,
     ) -> Reservation:
@@ -127,10 +136,17 @@ class QuotaStore:
         now = now or datetime.now(UTC)
         q = spec.quota
         minute = int(now.timestamp() // 60)
+        hour, hour_ttl = _hour_window(now)
         day, day_ttl = _day_window(now, q.reset_tz)
         minute_ttl = max(1, 61 - int(now.timestamp()) % 60)
         total = input_tokens + output_tokens
-        provider_limits = provider_limits or (q.rpm, q.rpd, q.tpm, q.tpd)
+        limits: ProviderLimits = (
+            provider_limits
+            if provider_limits is not None
+            else (q.rpm, q.rpd, q.tpm, q.tpd, q.rph, q.tph)
+        )
+        provider_rph = limits[4] if len(limits) > 4 else q.rph
+        provider_tph = limits[5] if len(limits) > 5 else q.tph
         if workload_share is None:
             workload_share = 0.5 if workload == "cactus-brief" else 0.25
         if not 0 < workload_share <= 1:
@@ -143,28 +159,38 @@ class QuotaStore:
         account = f"fr:v1:{spec.provider}"
         model = f"{account}:{spec.model}"
         windows: list[tuple[str, int, int, int]] = [
-            (f"{account}:rpm:{minute}", 1, cap(provider_limits[0]), minute_ttl),
-            (f"{account}:rpd:{day}", 1, cap(provider_limits[1]), day_ttl),
-            (f"{account}:tpm:{minute}", total, cap(provider_limits[2]), minute_ttl),
-            (f"{account}:tpd:{day}", total, cap(provider_limits[3]), day_ttl),
+            (f"{account}:rpm:{minute}", 1, cap(limits[0]), minute_ttl),
+            (f"{account}:rpd:{day}", 1, cap(limits[1]), day_ttl),
+            (f"{account}:tpm:{minute}", total, cap(limits[2]), minute_ttl),
+            (f"{account}:tpd:{day}", total, cap(limits[3]), day_ttl),
             (f"{model}:rpm:{minute}", 1, cap(q.rpm), minute_ttl),
             (f"{model}:rpd:{day}", 1, cap(q.rpd), day_ttl),
             (f"{model}:tpm:{minute}", total, cap(q.tpm), minute_ttl),
             (f"{model}:tpd:{day}", total, cap(q.tpd), day_ttl),
         ]
+        if q.rph is not None and q.tph is not None:
+            assert provider_rph is not None and provider_tph is not None
+            windows.extend(
+                (
+                    (f"{account}:rph:{hour}", 1, cap(provider_rph), hour_ttl),
+                    (f"{account}:tph:{hour}", total, cap(provider_tph), hour_ttl),
+                    (f"{model}:rph:{hour}", 1, cap(q.rph), hour_ttl),
+                    (f"{model}:tph:{hour}", total, cap(q.tph), hour_ttl),
+                )
+            )
         # Every workload has its own ceiling. The deadline brief retains a
         # guaranteed share even when the other editorial queues are busy.
         windows += [
             (
                 f"{account}:{workload}:rpd:{day}",
                 1,
-                max(1, int(cap(provider_limits[1]) * workload_share)),
+                max(1, int(cap(limits[1]) * workload_share)),
                 day_ttl,
             ),
             (
                 f"{account}:{workload}:tpd:{day}",
                 total,
-                max(1, int(cap(provider_limits[3]) * workload_share)),
+                max(1, int(cap(limits[3]) * workload_share)),
                 day_ttl,
             ),
         ]
@@ -204,7 +230,7 @@ class QuotaStore:
         delta = actual - estimated
         adjustments = [0] * len(reservation.keys)
         for i, key in enumerate(reservation.keys):
-            if ":tpm:" in key or ":tpd:" in key:
+            if any(f":{window}:" in key for window in ("tpm", "tph", "tpd")):
                 adjustments[i] = delta
         if any(adjustments):
             try:
@@ -219,6 +245,8 @@ class QuotaStore:
         *,
         provider_rpd: int | None = None,
         provider_tpd: int | None = None,
+        provider_rph: int | None = None,
+        provider_tph: int | None = None,
         workload: str | None = None,
         workload_share: float | None = None,
         request_tokens: int | None = None,
@@ -233,7 +261,8 @@ class QuotaStore:
         if type(request_tokens) is not int or not 0 < request_tokens <= spec.context_tokens:
             raise ValueError("invalid_request_token_budget")
         now = now or datetime.now(UTC)
-        day, _ = _day_window(now, spec.quota.reset_tz)
+        day, day_ttl = _day_window(now, spec.quota.reset_tz)
+        hour, hour_ttl = _hour_window(now)
         try:
             used = int(self.client.get(f"fr:v1:{spec.provider}:rpd:{day}") or 0)
             model_used = int(self.client.get(f"fr:v1:{spec.provider}:{spec.model}:rpd:{day}") or 0)
@@ -256,6 +285,15 @@ class QuotaStore:
                 if workload
                 else 0
             )
+            if spec.quota.rph is not None:
+                hour_requests_used = int(self.client.get(f"fr:v1:{spec.provider}:rph:{hour}") or 0)
+                model_hour_requests_used = int(
+                    self.client.get(f"fr:v1:{spec.provider}:{spec.model}:rph:{hour}") or 0
+                )
+                hour_tokens_used = int(self.client.get(f"fr:v1:{spec.provider}:tph:{hour}") or 0)
+                model_hour_tokens_used = int(
+                    self.client.get(f"fr:v1:{spec.provider}:{spec.model}:tph:{hour}") or 0
+                )
         except redis.RedisError as exc:
             raise RuntimeError("quota_store_unavailable") from exc
         ceiling = min(spec.quota.rpd, provider_rpd or spec.quota.rpd)
@@ -265,6 +303,31 @@ class QuotaStore:
             max(0, int((provider_tpd or spec.quota.tpd) * 0.9) - tokens_used) // request_tokens,
             max(0, int(spec.quota.tpd * 0.9) - model_tokens_used) // request_tokens,
         )
+        if spec.quota.rph is not None and spec.quota.tph is not None:
+            future_hours = max(0, math.ceil((day_ttl - hour_ttl) / 3600))
+            account_rph = provider_rph or spec.quota.rph
+            account_tph = provider_tph or spec.quota.tph
+
+            def hourly_cap(value: int) -> int:
+                return max(1, int(value * 0.9))
+
+            remaining = min(
+                remaining,
+                max(0, hourly_cap(account_rph) - hour_requests_used)
+                + future_hours * hourly_cap(account_rph),
+                max(0, hourly_cap(spec.quota.rph) - model_hour_requests_used)
+                + future_hours * hourly_cap(spec.quota.rph),
+                (
+                    max(0, hourly_cap(account_tph) - hour_tokens_used)
+                    + future_hours * hourly_cap(account_tph)
+                )
+                // request_tokens,
+                (
+                    max(0, hourly_cap(spec.quota.tph) - model_hour_tokens_used)
+                    + future_hours * hourly_cap(spec.quota.tph)
+                )
+                // request_tokens,
+            )
         if spec.quota.daily_neurons is not None:
             # Worst-case cost for a request filling the verified context window.
             # This keeps the free Neuron budget in the readiness calculation.
@@ -301,6 +364,52 @@ class QuotaStore:
                 // request_tokens,
             )
         return max(0, remaining)
+
+    def remaining_hourly_requests(
+        self,
+        spec: ModelSpec,
+        *,
+        provider_rph: int | None = None,
+        provider_tph: int | None = None,
+        request_tokens: int | None = None,
+        now: datetime | None = None,
+    ) -> int:
+        """Check whether a model can serve another request in this hour."""
+        self._require_healthy()
+        q = spec.quota
+        if q.rph is None or q.tph is None:
+            return q.rpd
+        if request_tokens is None:
+            request_tokens = spec.context_tokens
+        if type(request_tokens) is not int or not 0 < request_tokens <= spec.context_tokens:
+            raise ValueError("invalid_request_token_budget")
+        hour, _ = _hour_window(now or datetime.now(UTC))
+        account = f"fr:v1:{spec.provider}"
+        model = f"{account}:{spec.model}"
+        try:
+            used = [
+                int(self.client.get(key) or 0)
+                for key in (
+                    f"{account}:rph:{hour}",
+                    f"{account}:tph:{hour}",
+                    f"{model}:rph:{hour}",
+                    f"{model}:tph:{hour}",
+                )
+            ]
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+        return max(
+            0,
+            min(
+                max(1, int((provider_rph or q.rph) * 0.9)) - used[0],
+                (max(1, int((provider_tph or q.tph) * 0.9)) - used[1]) // request_tokens,
+                max(1, int(q.rph * 0.9)) - used[2],
+                (max(1, int(q.tph * 0.9)) - used[3]) // request_tokens,
+            ),
+        )
+
+    def seconds_until_hourly_reset(self, *, now: datetime | None = None) -> int:
+        return _hour_window(now or datetime.now(UTC))[1]
 
     def cooldown_remaining(self, spec: ModelSpec) -> int:
         self._require_healthy()

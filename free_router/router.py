@@ -61,9 +61,16 @@ class EditorialRouter:
     def reload(self) -> None:
         self.models, self.rejected = load_models(self.catalog_path)
 
-    def _provider_cap(self, provider: str) -> tuple[int, int, int, int]:
+    def _provider_cap(self, provider: str) -> tuple[int, int, int, int, int | None, int | None]:
         rows = [m.quota for m in self.models if m.provider == provider]
-        return tuple(min(getattr(q, k) for q in rows) for k in ("rpm", "rpd", "tpm", "tpd"))
+        base = tuple(min(getattr(q, k) for q in rows) for k in ("rpm", "rpd", "tpm", "tpd"))
+        hourly = tuple(
+            min(values)
+            if (values := [getattr(q, key) for q in rows if getattr(q, key, None)])
+            else None
+            for key in ("rph", "tph")
+        )
+        return (*base, *hourly)
 
     def _workload_share(self, workload: str) -> float:
         peaks = [self.daily_peak.get(w, 0) for w in WORKLOADS]
@@ -90,11 +97,24 @@ class EditorialRouter:
                 cooldown = self.quota.cooldown_remaining(spec)
                 if cooldown:
                     waits.append(cooldown)
+                limits = self._provider_cap(spec.provider)
+                if (
+                    self.quota.remaining_hourly_requests(
+                        spec,
+                        provider_rph=limits[4],
+                        provider_tph=limits[5],
+                        request_tokens=self.request_tokens.get(workload),
+                    )
+                    == 0
+                ):
+                    waits.append(self.quota.seconds_until_hourly_reset())
                 if (
                     self.quota.remaining_daily_requests(
                         spec,
-                        provider_rpd=self._provider_cap(spec.provider)[1],
-                        provider_tpd=self._provider_cap(spec.provider)[3],
+                        provider_rpd=limits[1],
+                        provider_tpd=limits[3],
+                        provider_rph=limits[4],
+                        provider_tph=limits[5],
                         workload=workload,
                         workload_share=self._workload_share(workload),
                         request_tokens=self.request_tokens.get(workload),
@@ -115,10 +135,19 @@ class EditorialRouter:
                 if workload in m.workloads
                 and (planned_tokens is None or planned_tokens <= m.context_tokens)
                 and self.quota.cooldown_remaining(m) == 0
+                and self.quota.remaining_hourly_requests(
+                    m,
+                    provider_rph=self._provider_cap(m.provider)[4],
+                    provider_tph=self._provider_cap(m.provider)[5],
+                    request_tokens=planned_tokens,
+                )
+                > 0
                 and self.quota.remaining_daily_requests(
                     m,
                     provider_rpd=self._provider_cap(m.provider)[1],
                     provider_tpd=self._provider_cap(m.provider)[3],
+                    provider_rph=self._provider_cap(m.provider)[4],
+                    provider_tph=self._provider_cap(m.provider)[5],
                     workload=workload,
                     workload_share=self._workload_share(workload),
                     request_tokens=planned_tokens,
@@ -153,6 +182,8 @@ class EditorialRouter:
                     next(m for m in eligible if m.provider == p),
                     provider_rpd=self._provider_cap(p)[1],
                     provider_tpd=self._provider_cap(p)[3],
+                    provider_rph=self._provider_cap(p)[4],
+                    provider_tph=self._provider_cap(p)[5],
                     workload=workload,
                     workload_share=self._workload_share(workload),
                     request_tokens=planned_tokens,
@@ -172,6 +203,8 @@ class EditorialRouter:
                         spec,
                         provider_rpd=self._provider_cap(p)[1],
                         provider_tpd=self._provider_cap(p)[3],
+                        provider_rph=self._provider_cap(p)[4],
+                        provider_tph=self._provider_cap(p)[5],
                         request_tokens=shared_tokens,
                     )
                     if shared_tokens is None or shared_tokens <= spec.context_tokens
@@ -261,8 +294,25 @@ class EditorialRouter:
                 if cooldown:
                     waits.append(cooldown)
                     continue
+                limits = self._provider_cap(m.provider)
+                if (
+                    self.quota.remaining_hourly_requests(
+                        m,
+                        provider_rph=limits[4],
+                        provider_tph=limits[5],
+                        request_tokens=input_tokens + max_tokens,
+                    )
+                    == 0
+                ):
+                    waits.append(self.quota.seconds_until_hourly_reset())
+                    continue
                 remaining = self.quota.remaining_daily_requests(
-                    m, request_tokens=input_tokens + max_tokens
+                    m,
+                    provider_rpd=limits[1],
+                    provider_tpd=limits[3],
+                    provider_rph=limits[4],
+                    provider_tph=limits[5],
+                    request_tokens=input_tokens + max_tokens,
                 )
                 ranked.append((m.standby, -remaining / max(1, m.quota.rpd), m.provider, m))
         except RuntimeError:

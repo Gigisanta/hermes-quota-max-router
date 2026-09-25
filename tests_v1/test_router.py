@@ -427,6 +427,9 @@ async def test_simplellm_candidate_requires_own_key_and_uses_its_documented_endp
         model="gemma-4-E4B",
         evidence_url="https://simplellm.eu/docs/models.html",
     )
+    with pytest.raises(ValueError, match="missing_simplellm_hourly_quota"):
+        ModelSpec.parse(raw)
+    raw["quota"].update(rph=100, tph=100000)
     monkeypatch.delenv("SIMPLELLM_API_KEY", raising=False)
     with pytest.raises(ValueError, match="missing_provider_key"):
         ModelSpec.parse(raw)
@@ -455,6 +458,40 @@ async def test_simplellm_candidate_requires_own_key_and_uses_its_documented_endp
         )
     assert result["content"] == "ok"
     assert seen == ["https://api.simplellm.eu/v1/chat/completions"]
+
+
+def test_simplellm_hourly_account_quota_is_atomic_and_removes_reserve(catalog, quota, monkeypatch):
+    raw = json.loads(catalog.read_text(encoding="utf-8"))
+    standby = raw["models"][-1]
+    standby.update(
+        provider="simplellm",
+        model="gemma-4-E4B",
+        evidence_url="https://simplellm.eu/docs/models.html",
+    )
+    standby["quota"].update(rph=2, tph=2000)
+    catalog.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setenv("SIMPLELLM_API_KEY", "test-key")
+    router = EditorialRouter(
+        quota,
+        FakeProvider(),
+        catalog,
+        {
+            name: {"requests": 2, "tokens_per_request": 1000}
+            for name in ("journal", "simon-news", "cactus-brief")
+        },
+    )
+    assert router.readiness("journal")["providers"] == 4
+    spec = next(model for model in router.models if model.provider == "simplellm")
+    reservation = quota.reserve(
+        spec, "journal", 500, 500, provider_limits=router._provider_cap("simplellm")
+    )
+    assert reservation.keys
+    assert quota.remaining_hourly_requests(spec, request_tokens=1000) == 0
+    assert quota.reserve(spec, "journal", 500, 500).retry_after > 0
+    status = router.readiness("journal")
+    assert not status["ready"]
+    assert status["providers"] == 3
+    assert "less_than_four_independent_providers" in status["reasons"]
 
 
 @pytest.mark.asyncio

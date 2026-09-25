@@ -47,11 +47,20 @@ def _editorial_smoke_passed(content: str) -> bool:
     )
 
 
-def _provider_limits(models: list[ModelSpec], provider: str) -> tuple[int, int, int, int]:
+def _provider_limits(
+    models: list[ModelSpec], provider: str
+) -> tuple[int, int, int, int, int | None, int | None]:
     quotas = [model.quota for model in models if model.provider == provider]
-    return tuple(
+    base = tuple(
         min(getattr(quota, key) for quota in quotas) for key in ("rpm", "rpd", "tpm", "tpd")
     )
+    hourly = tuple(
+        min(values)
+        if (values := [getattr(quota, key) for quota in quotas if getattr(quota, key, None)])
+        else None
+        for key in ("rph", "tph")
+    )
+    return (*base, *hourly)
 
 
 def _directory_entries(readme: str) -> list[dict[str, str]]:
