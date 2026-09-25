@@ -1,5 +1,7 @@
 # Piloto editorial sin publicación
 
+El [corte inicial de evaluación Gemini del 25-09-2026](GEMINI-EDITORIAL-EVALUATION-2026-09-25.md) registra casos, hashes, gates y brechas. Los seis escenarios ficticios de Cactus se reportan aparte del historial real.
+
 El router y los tres adaptadores arrancan desactivados. Este piloto dura **siete días consecutivos** y no publica contenido. Si hay menos de cuatro proveedores independientes aptos para una carga, la prueba puede usar `ROUTER_PILOT_MODE=1` para medirla sin cambiar su ruta principal; sus resultados no satisfacen la compuerta de producción.
 
 ## Preparación

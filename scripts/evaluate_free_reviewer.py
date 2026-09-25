@@ -30,14 +30,21 @@ REVIEW_SYSTEM = (
     "approved false e issues con explicaciones breves. No reescribas el artículo."
 )
 FROZEN_JOURNAL_SUITE_SHA256 = "c5ba0b687443437f8fd73ba19d734a3af00a955924a6a80c3e4392bdbee0c65e"
-# These exact endpoints/models have account-verified zero-price synthetic smokes.
-# Adding a model here requires a fresh price, account and access verification.
+# Price and Free account must be verified before use. Availability and quality
+# remain candidate-specific; a successful smoke is not admission evidence.
 VERIFIED_EVAL_TARGETS = {
     "gemini": {
         "model": "gemini-3.5-flash-lite",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "env": "GEMINI_API_KEY",
         "min_interval_seconds": 4.1,  # 15 RPM observed on this account.
+    },
+    "gemini-3.1": {
+        "model": "gemini-3.1-flash-lite",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "env": "GEMINI_API_KEY",
+        "min_interval_seconds": 4.1,
+        "lock_provider": "gemini",
     },
     "simplellm": {
         "model": "gemma-4-E4B",
@@ -252,7 +259,7 @@ def main() -> int:
     )
     timeout = httpx.Timeout(120, connect=10)
     with (
-        _provider_eval_lock(args.provider),
+        _provider_eval_lock(str(target.get("lock_provider", args.provider))),
         httpx.Client(timeout=timeout, trust_env=False) as client,
     ):
         for case in max_cases:
@@ -311,8 +318,32 @@ def main() -> int:
                 )
             item["elapsed_seconds"] = round(time.monotonic() - started, 3)
             if case["id"] in prior:
+                previous = report["results"][prior[case["id"]]]
+                item["attempts"] = previous.get(
+                    "attempts",
+                    [
+                        {
+                            "at": report.get("started_at"),
+                            "error": previous.get("error"),
+                            "elapsed_seconds": previous.get("elapsed_seconds"),
+                        }
+                    ],
+                ) + [
+                    {
+                        "at": datetime.now(UTC).isoformat(),
+                        "error": item.get("error"),
+                        "elapsed_seconds": item["elapsed_seconds"],
+                    }
+                ]
                 report["results"][prior[case["id"]]] = item
             else:
+                item["attempts"] = [
+                    {
+                        "at": datetime.now(UTC).isoformat(),
+                        "error": item.get("error"),
+                        "elapsed_seconds": item["elapsed_seconds"],
+                    }
+                ]
                 prior[case["id"]] = len(report["results"])
                 report["results"].append(item)
             judged = [row for row in report["results"] if "approved" in row]
@@ -326,6 +357,13 @@ def main() -> int:
                 "false_rejects": sum(
                     not row["approved"] and row["expected_approved"] for row in judged
                 ),
+                "attempts": sum(len(row.get("attempts", [])) for row in report["results"]),
+                "api_failures": sum(
+                    attempt.get("error")
+                    in ("http_429", "http_503", "ReadTimeout", "ConnectTimeout")
+                    for row in report["results"]
+                    for attempt in row.get("attempts", [])
+                ),
             }
             _write_report(args.output, report)
             print(
@@ -335,12 +373,18 @@ def main() -> int:
             )
             if item.get("error", "").startswith("free_quota_"):
                 break
-            if item.get("error") == "http_429":
+            if item.get("error") in ("http_429", "http_503", "ReadTimeout", "ConnectTimeout"):
                 break
             remaining = float(target["min_interval_seconds"]) - (time.monotonic() - started)
             if remaining > 0:
                 time.sleep(remaining)
-    return 0 if report["metrics"]["errors"] == 0 else 2
+    return (
+        0
+        if report["metrics"]["judged"] == len(max_cases)
+        and report["metrics"]["correct"] == len(max_cases)
+        and report["metrics"]["errors"] == 0
+        else 2
+    )
 
 
 if __name__ == "__main__":
