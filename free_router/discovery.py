@@ -23,6 +23,10 @@ ACCESS_AUDIT_PROMPT = (
     "Redactá una sola oración informativa, fiel al dato y sin agregar información."
 )
 ACCESS_AUDIT_OUTPUT_TOKENS = 48
+# Gemma 4 E4B can spend a short budget on reasoning before emitting the
+# visible sentence. A live 48-token probe returned HTTP 200 with empty content;
+# the same prompt completed with a 512-token cap on the verified free model.
+SIMPLELLM_ACCESS_AUDIT_OUTPUT_TOKENS = 512
 ACCESS_AUDIT_COOLDOWN_SECONDS = 24 * 60 * 60
 
 
@@ -154,6 +158,11 @@ async def audit_access(
     input_tokens = max(1, len(ACCESS_AUDIT_PROMPT.encode("utf-8")) + 64)
 
     for spec in models:
+        output_tokens = (
+            SIMPLELLM_ACCESS_AUDIT_OUTPUT_TOKENS
+            if spec.provider == "simplellm"
+            else ACCESS_AUDIT_OUTPUT_TOKENS
+        )
         entry: dict[str, Any] = {
             "id": spec.id,
             "provider": spec.provider,
@@ -180,7 +189,7 @@ async def audit_access(
                 spec,
                 "audit",
                 input_tokens,
-                ACCESS_AUDIT_OUTPUT_TOKENS,
+                output_tokens,
                 provider_limits=_provider_limits(models, spec.provider),
             )
         except RuntimeError:
@@ -199,7 +208,7 @@ async def audit_access(
             continue
 
         try:
-            result = await provider.complete(spec, messages, ACCESS_AUDIT_OUTPUT_TOKENS, 0.0)
+            result = await provider.complete(spec, messages, output_tokens, 0.0)
         except ProviderFailure as exc:
             if exc.reason == "provider_concurrency_busy":
                 try:
@@ -242,7 +251,7 @@ async def audit_access(
             quota.reconcile(
                 reservation,
                 input_tokens,
-                ACCESS_AUDIT_OUTPUT_TOKENS,
+                output_tokens,
                 prompt_usage,
                 completion_usage,
             )

@@ -10,17 +10,79 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from free_router.config import load_models
+from free_router.config import ModelSpec, load_models
 from free_router.discovery import (
     ACCESS_AUDIT_OUTPUT_TOKENS,
     ACCESS_AUDIT_PROMPT,
     FREE_LLM_DIRECTORY,
+    SIMPLELLM_ACCESS_AUDIT_OUTPUT_TOKENS,
     audit_access,
     audit_all,
     audit_catalog,
 )
-from free_router.provider import ProviderClient
+from free_router.provider import ProviderClient, ProviderFailure
 from free_router.quota import QuotaStore, Reservation
+
+
+@pytest.mark.asyncio
+async def test_simplellm_audit_allows_visible_answer_after_reasoning(
+    catalog: Path, quota: QuotaStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    raw = json.loads(catalog.read_text())["models"][0]
+    raw.update(
+        provider="simplellm",
+        model="gemma-4-E4B",
+        evidence_url="https://simplellm.eu/docs/models.html",
+    )
+    raw["quota"].update(rph=100, tph=50000)
+    monkeypatch.setenv("SIMPLELLM_API_KEY", "test-simplellm-key")
+    spec = ModelSpec.parse(raw)
+    budgets: list[int] = []
+    # The live Gemma smoke needed 512 output tokens to emit visible text.
+    # Keep this threshold independent of the production constant so lowering
+    # that constant cannot make the fixture pass by changing its own oracle.
+    required_visible_budget = 512
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        budget = json.loads(request.content)["max_tokens"]
+        budgets.append(budget)
+        if budget < required_visible_budget:
+            return httpx.Response(
+                200,
+                json={
+                    "model": spec.model,
+                    "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+                    "usage": {"prompt_tokens": 122, "completion_tokens": budget},
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "model": spec.model,
+                "choices": [
+                    {
+                        "message": {"content": "La biblioteca municipal abre el martes a las 10."},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 122, "completion_tokens": 269},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = ProviderClient(client, quota=quota)
+        with pytest.raises(ProviderFailure) as short_response:
+            await provider.complete(
+                spec,
+                [{"role": "user", "content": ACCESS_AUDIT_PROMPT}],
+                ACCESS_AUDIT_OUTPUT_TOKENS,
+                0.0,
+            )
+        assert short_response.value.reason == "malformed_upstream_response"
+        report = await audit_access([spec], quota, provider, output=tmp_path / "audit.json")
+    assert SIMPLELLM_ACCESS_AUDIT_OUTPUT_TOKENS >= required_visible_budget
+    assert budgets == [ACCESS_AUDIT_OUTPUT_TOKENS, SIMPLELLM_ACCESS_AUDIT_OUTPUT_TOKENS]
+    assert report["models"][0]["status"] == "passed"
 
 
 @pytest.mark.asyncio
