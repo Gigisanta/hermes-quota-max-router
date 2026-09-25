@@ -3,8 +3,19 @@
 import json
 import sqlite3
 from dataclasses import asdict
+from pathlib import Path
 
 import pytest
+
+if not (
+    Path("/Users/gigi/HerMaatOS/bin/newsblog/article.py").is_file()
+    and Path(
+        "/Users/gigi/HerMaatOS/work/maatwork-brand-repos/cactuswealth-market-brief/src/cw/model/types.py"
+    ).is_file()
+):
+    pytest.skip(
+        "product integration tests require the HerMaatOS sibling checkouts", allow_module_level=True
+    )
 
 from scripts import prepare_editorial_suites as suites
 from scripts.evaluate_cactus_synthetic import (
