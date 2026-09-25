@@ -146,7 +146,10 @@ def _plist(release: Path, logs: Path) -> bytes:
         "RunAtLoad": True,
         "KeepAlive": True,
         "ThrottleInterval": 30,
-        "EnvironmentVariables": {"ROUTER_RELEASE_SHA": release.name},
+        "EnvironmentVariables": {
+            "ROUTER_RELEASE_SHA": release.name,
+            "ROUTER_CANDIDATE_WATCHLIST": str(release / "config/provider-watchlist.json"),
+        },
         "StandardOutPath": str(logs / "stdout.log"),
         "StandardErrorPath": str(logs / "stderr.log"),
     }
@@ -155,17 +158,21 @@ def _plist(release: Path, logs: Path) -> bytes:
 
 def _healthy(commit: str) -> bool:
     try:
-        with build_opener(ProxyHandler({})).open(
-            "http://127.0.0.1:8123/health", timeout=2
-        ) as response:
+        opener = build_opener(ProxyHandler({}))
+        with opener.open("http://127.0.0.1:8123/health", timeout=2) as response:
             payload = json.load(response)
         if not isinstance(payload, dict):
             return False
+        with opener.open("http://127.0.0.1:8123/v1/router/status", timeout=2) as response:
+            reserve = json.load(response)
         return (
             payload.get("status") == "ok"
             and payload.get("redis") is True
             and payload.get("release") == commit
             and payload.get("service_configured") is True
+            and isinstance(reserve, dict)
+            and reserve.get("candidate_watchlist_error") is None
+            and isinstance(reserve.get("candidate_backlog"), list)
         )
     except (OSError, ValueError):
         return False

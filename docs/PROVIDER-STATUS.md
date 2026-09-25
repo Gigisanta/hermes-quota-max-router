@@ -132,6 +132,27 @@ diarios, pero sus [términos vigentes](https://plugsky.com/legal/terms) describe
 el plan Free como una prueba de siete días. La afirmación promocional no
 acredita capacidad permanente: se excluye de la reserva.
 
+## Ocho operadores adicionales revisados el 25 de septiembre
+
+La revisión de fuentes oficiales no encontró otra ruta apta de tarifa cero
+permanente para generación editorial comercial:
+
+| Operador | Resultado |
+| --- | --- |
+| [Baidu Qianfan](https://cloud.baidu.com/doc/qianfan/index.html) | La oferta actual también presenta cupones de bienvenida; el [acuerdo de experiencia](https://ai.baidu.com/ai-doc/WENXINWORKSHOP/Rlgujm1c6) impone restricciones sobre resultados y derivados. No se pudo verificar la cuota permanente de una cuenta MaatWork. |
+| [IBM watsonx.ai](https://www.ibm.com/docs/en/watsonx/saas?topic=watsonx-faq) | Lite es evaluativo; los límites gratuitos publicados no son consistentes entre páginas y [el alta suele requerir tarjeta](https://cloud.ibm.com/docs/account?topic=account-accountfaqs). No acredita producción a costo cero. |
+| [Nebius Token Factory](https://nebius.com/token-factory/prices) | Ofrece un crédito inicial, sujeto a [términos de Builder](https://nebius.com/builders-terms-and-conditions); no es tarifa cero sostenida. |
+| [Fireworks AI](https://fireworks.ai/pricing) | Ofrece un crédito inicial y después cobra por uso. |
+| [DeepInfra](https://deepinfra.com/) | Sus modelos tienen tarifas positivas y los [términos](https://deepinfra.com/terms) restringen usos competitivos. |
+| [Jina AI](https://jina.ai/embeddings/) | La oferta citada es embeddings y reranking, no generación editorial de chat; su [página legal](https://jina.ai/legal) advierte cambios tras la adquisición por Elastic. |
+| [Featherless AI](https://featherless.ai/pricing) | La API para automatización pertenece a planes pagos. |
+| [Modal Shared Endpoints](https://modal.com/docs/guide/shared-endpoints) | Cobra por token; los créditos generales del plan no cubren esos endpoints. |
+
+Todos figuran como excluidos en `config/provider-watchlist.json`, para que el
+directorio Free-LLM no los presente repetidamente como reserva nueva. Se
+reconsiderarán sólo si cambian las condiciones oficiales y se comprueba la
+cuota de la cuenta. Ninguno recibió alta ni prueba con datos editoriales.
+
 ## Próxima comprobación necesaria
 
 Para cada carga hacen falta cuatro operadores independientes con autor y revisor

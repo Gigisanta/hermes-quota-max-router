@@ -71,6 +71,70 @@
       "checked_at": "2026-09-25T00:00:00Z",
       "next_step": "No contar créditos mensuales como tarifa cero por modelo.",
       "official_urls": ["https://docs.mistral.ai/admin/billing-usage/subscriptions"]
+    },
+    {
+      "id": "baidu-qianfan",
+      "operator": "Baidu Qianfan",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El cupón actual no acredita capacidad permanente; además revisar el acuerdo de experiencia antes de uso editorial.",
+      "official_urls": ["https://cloud.baidu.com/doc/qianfan/index.html", "https://ai.baidu.com/ai-doc/WENXINWORKSHOP/Rlgujm1c6"]
+    },
+    {
+      "id": "ibm-watsonx",
+      "operator": "IBM watsonx.ai",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El nivel Lite evaluativo y sus límites contradictorios no acreditan producción editorial gratuita continua.",
+      "official_urls": ["https://www.ibm.com/docs/en/watsonx/saas?topic=watsonx-faq", "https://cloud.ibm.com/docs/account?topic=account-accountfaqs"]
+    },
+    {
+      "id": "nebius",
+      "operator": "Nebius Token Factory",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El crédito promocional inicial no es un modelo de tarifa cero permanente.",
+      "official_urls": ["https://nebius.com/token-factory/prices", "https://nebius.com/builders-terms-and-conditions"]
+    },
+    {
+      "id": "fireworks",
+      "operator": "Fireworks AI",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El crédito inicial se agota y la API cobra por uso; no cuenta como reserva.",
+      "official_urls": ["https://fireworks.ai/pricing"]
+    },
+    {
+      "id": "deepinfra",
+      "operator": "DeepInfra",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El catálogo cobra por token y los términos restringen usos competitivos.",
+      "official_urls": ["https://deepinfra.com/", "https://deepinfra.com/terms"]
+    },
+    {
+      "id": "jina",
+      "operator": "Jina AI",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "Embeddings y reranking no sustituyen una API de generación editorial; revisar documentación tras adquisición por Elastic.",
+      "official_urls": ["https://jina.ai/embeddings/", "https://jina.ai/legal"]
+    },
+    {
+      "id": "featherless",
+      "operator": "Featherless AI",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El plan con API y automatización es pago.",
+      "official_urls": ["https://featherless.ai/pricing", "https://featherless.ai/terms"]
+    },
+    {
+      "id": "modal",
+      "operator": "Modal",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "Shared Endpoints cobra por token, incluso con créditos generales del plan.",
+      "official_urls": ["https://modal.com/docs/guide/shared-endpoints"]
     }
   ]
 }

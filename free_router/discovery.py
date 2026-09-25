@@ -29,7 +29,12 @@ ACCESS_AUDIT_OUTPUT_TOKENS = 48
 # the same prompt completed with a 512-token cap on the verified free model.
 SIMPLELLM_ACCESS_AUDIT_OUTPUT_TOKENS = 512
 ACCESS_AUDIT_COOLDOWN_SECONDS = 24 * 60 * 60
-WATCHLIST = Path(__file__).resolve().parents[1] / "config/provider-watchlist.json"
+WATCHLIST = Path(
+    os.getenv(
+        "ROUTER_CANDIDATE_WATCHLIST",
+        str(Path(__file__).resolve().parents[1] / "config/provider-watchlist.json"),
+    )
+)
 WATCHLIST_REVIEW_DAYS = 7
 
 
