@@ -30,6 +30,9 @@ class JobQueue:
                 updated_at REAL NOT NULL, idempotency_key TEXT NOT NULL,
                 UNIQUE(workload, idempotency_key))""")
             conn.execute("CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status, next_attempt)")
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+            if "planned_tokens" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN planned_tokens INTEGER")
             conn.execute("""CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY, workload TEXT NOT NULL, stage TEXT NOT NULL,
                 status TEXT NOT NULL, provider TEXT, model TEXT,
@@ -43,7 +46,14 @@ class JobQueue:
         return conn
 
     def enqueue(
-        self, workload: str, stage: str, request: dict, idempotency_key: str, retry_after: int
+        self,
+        workload: str,
+        stage: str,
+        request: dict,
+        idempotency_key: str,
+        retry_after: int,
+        *,
+        planned_tokens: int | None = None,
     ) -> str:
         now = time.time()
         job_id = uuid4().hex
@@ -51,8 +61,9 @@ class JobQueue:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 """INSERT OR IGNORE INTO jobs
-                (id, workload, stage, request_json, status, next_attempt, created_at, updated_at, idempotency_key)
-                VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)""",
+                (id, workload, stage, request_json, status, next_attempt, created_at,
+                 updated_at, idempotency_key, planned_tokens)
+                VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)""",
                 (
                     job_id,
                     workload,
@@ -62,6 +73,7 @@ class JobQueue:
                     now,
                     now,
                     idempotency_key,
+                    planned_tokens,
                 ),
             )
             row = conn.execute(
@@ -72,7 +84,13 @@ class JobQueue:
             return row["id"]
 
     def begin(
-        self, workload: str, stage: str, request: dict, idempotency_key: str
+        self,
+        workload: str,
+        stage: str,
+        request: dict,
+        idempotency_key: str,
+        *,
+        planned_tokens: int | None = None,
     ) -> tuple[str, bool]:
         """Atomically claim a new request before any provider call."""
         now = time.time()
@@ -83,8 +101,8 @@ class JobQueue:
                 conn.execute(
                     """INSERT OR IGNORE INTO jobs
                 (id, workload, stage, request_json, status, next_attempt, lease_until,
-                 attempts, created_at, updated_at, idempotency_key)
-                VALUES (?, ?, ?, ?, 'running', ?, ?, 1, ?, ?, ?)""",
+                 attempts, created_at, updated_at, idempotency_key, planned_tokens)
+                VALUES (?, ?, ?, ?, 'running', ?, ?, 1, ?, ?, ?, ?)""",
                     (
                         job_id,
                         workload,
@@ -95,6 +113,7 @@ class JobQueue:
                         now,
                         now,
                         idempotency_key,
+                        planned_tokens,
                     ),
                 ).rowcount
                 == 1
@@ -252,7 +271,9 @@ class JobQueue:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT date(created_at, 'unixepoch') AS day, workload,
-                          COUNT(*) AS requests
+                          COUNT(*) AS requests,
+                          COUNT(planned_tokens) AS planned_token_samples,
+                          MAX(planned_tokens) AS max_planned_tokens
                    FROM jobs WHERE created_at >= ? AND created_at < ?
                    GROUP BY day, workload ORDER BY day, workload""",
                 (start, end),

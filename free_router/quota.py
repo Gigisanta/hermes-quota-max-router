@@ -221,9 +221,17 @@ class QuotaStore:
         provider_tpd: int | None = None,
         workload: str | None = None,
         workload_share: float | None = None,
+        request_tokens: int | None = None,
         now: datetime | None = None,
     ) -> int:
         self._require_healthy()
+        # A measured planning envelope can be smaller than the advertised
+        # context window. Every real request still reserves its actual input
+        # estimate and requested maximum output atomically in Redis.
+        if request_tokens is None:
+            request_tokens = spec.context_tokens
+        if type(request_tokens) is not int or not 0 < request_tokens <= spec.context_tokens:
+            raise ValueError("invalid_request_token_budget")
         now = now or datetime.now(UTC)
         day, _ = _day_window(now, spec.quota.reset_tz)
         try:
@@ -254,9 +262,8 @@ class QuotaStore:
         remaining = min(int(ceiling * 0.9) - used, int(spec.quota.rpd * 0.9) - model_used)
         remaining = min(
             remaining,
-            max(0, int((provider_tpd or spec.quota.tpd) * 0.9) - tokens_used)
-            // spec.context_tokens,
-            max(0, int(spec.quota.tpd * 0.9) - model_tokens_used) // spec.context_tokens,
+            max(0, int((provider_tpd or spec.quota.tpd) * 0.9) - tokens_used) // request_tokens,
+            max(0, int(spec.quota.tpd * 0.9) - model_tokens_used) // request_tokens,
         )
         if spec.quota.daily_neurons is not None:
             # Worst-case cost for a request filling the verified context window.
@@ -266,7 +273,7 @@ class QuotaStore:
             neuron_cost = max(
                 1,
                 math.ceil(
-                    spec.context_tokens
+                    request_tokens
                     * max(
                         spec.quota.neurons_per_million_input,
                         spec.quota.neurons_per_million_output,
@@ -291,7 +298,7 @@ class QuotaStore:
                     int(int((provider_tpd or spec.quota.tpd) * 0.9) * workload_share)
                     - workload_tokens_used,
                 )
-                // spec.context_tokens,
+                // request_tokens,
             )
         return max(0, remaining)
 

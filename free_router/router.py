@@ -27,17 +27,25 @@ class EditorialRouter:
         quota: QuotaStore,
         provider: ProviderClient,
         catalog_path: Path,
-        daily_peak: dict[str, int],
+        daily_peak: dict[str, int | dict[str, int]],
         production_workloads: tuple[str, ...] | None = None,
     ):
         self.quota = quota
         self.provider = provider
         self.catalog_path = catalog_path
-        self.daily_peak = {
-            workload: peak
-            for workload, peak in daily_peak.items()
-            if workload in WORKLOADS and type(peak) is int and peak > 0
-        }
+        self.daily_peak: dict[str, int] = {}
+        self.request_tokens: dict[str, int] = {}
+        for workload, peak in daily_peak.items():
+            if workload not in WORKLOADS:
+                continue
+            if type(peak) is int and peak > 0:
+                self.daily_peak[workload] = peak
+            elif isinstance(peak, dict):
+                requests = peak.get("requests")
+                tokens = peak.get("tokens_per_request")
+                if type(requests) is int and requests > 0 and type(tokens) is int and tokens > 0:
+                    self.daily_peak[workload] = requests
+                    self.request_tokens[workload] = tokens
         configured = (
             production_workloads
             if production_workloads is not None
@@ -74,6 +82,11 @@ class EditorialRouter:
             for spec in self.models:
                 if workload not in spec.workloads:
                     continue
+                if (
+                    workload in self.request_tokens
+                    and self.request_tokens[workload] > spec.context_tokens
+                ):
+                    continue
                 cooldown = self.quota.cooldown_remaining(spec)
                 if cooldown:
                     waits.append(cooldown)
@@ -84,6 +97,7 @@ class EditorialRouter:
                         provider_tpd=self._provider_cap(spec.provider)[3],
                         workload=workload,
                         workload_share=self._workload_share(workload),
+                        request_tokens=self.request_tokens.get(workload),
                     )
                     == 0
                 ):
@@ -93,11 +107,13 @@ class EditorialRouter:
         return max(5, min(waits, default=300))
 
     def readiness(self, workload: str) -> dict:
+        planned_tokens = self.request_tokens.get(workload)
         try:
             eligible = [
                 m
                 for m in self.models
                 if workload in m.workloads
+                and (planned_tokens is None or planned_tokens <= m.context_tokens)
                 and self.quota.cooldown_remaining(m) == 0
                 and self.quota.remaining_daily_requests(
                     m,
@@ -105,6 +121,7 @@ class EditorialRouter:
                     provider_tpd=self._provider_cap(m.provider)[3],
                     workload=workload,
                     workload_share=self._workload_share(workload),
+                    request_tokens=planned_tokens,
                 )
                 > 0
             ]
@@ -116,6 +133,7 @@ class EditorialRouter:
                 "standby": 0,
                 "verified_daily_requests": 0,
                 "measured_peak_requests": self.daily_peak.get(workload),
+                "planned_tokens_per_request": planned_tokens,
                 "reasons": ["quota_store_unavailable"],
             }
         providers = {
@@ -137,17 +155,28 @@ class EditorialRouter:
                     provider_tpd=self._provider_cap(p)[3],
                     workload=workload,
                     workload_share=self._workload_share(workload),
+                    request_tokens=planned_tokens,
                 )
                 for p in providers
             }
-            full_remaining = {
-                p: self.quota.remaining_daily_requests(
-                    next(m for m in eligible if m.provider == p),
-                    provider_rpd=self._provider_cap(p)[1],
-                    provider_tpd=self._provider_cap(p)[3],
+            shared_tokens = (
+                max(self.request_tokens.values())
+                if len(self.request_tokens) == len(WORKLOADS)
+                else None
+            )
+            full_remaining = {}
+            for p in providers:
+                spec = next(m for m in eligible if m.provider == p)
+                full_remaining[p] = (
+                    self.quota.remaining_daily_requests(
+                        spec,
+                        provider_rpd=self._provider_cap(p)[1],
+                        provider_tpd=self._provider_cap(p)[3],
+                        request_tokens=shared_tokens,
+                    )
+                    if shared_tokens is None or shared_tokens <= spec.context_tokens
+                    else 0
                 )
-                for p in providers
-            }
         except RuntimeError:
             return {
                 "ready": False,
@@ -182,6 +211,7 @@ class EditorialRouter:
             "standby": len(standby),
             "verified_daily_requests": capacity,
             "measured_peak_requests": peak,
+            "planned_tokens_per_request": planned_tokens,
             "reasons": reasons,
         }
 
@@ -231,7 +261,9 @@ class EditorialRouter:
                 if cooldown:
                     waits.append(cooldown)
                     continue
-                remaining = self.quota.remaining_daily_requests(m)
+                remaining = self.quota.remaining_daily_requests(
+                    m, request_tokens=input_tokens + max_tokens
+                )
                 ranked.append((m.standby, -remaining / max(1, m.quota.rpd), m.provider, m))
         except RuntimeError:
             return Attempt(None, 60, "quota_store_unavailable")

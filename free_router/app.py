@@ -70,11 +70,27 @@ def _authorize(workload: str | None, authorization: str | None) -> str:
     return workload
 
 
-def _peak_config() -> dict[str, int]:
+def _peak_config() -> dict[str, int | dict[str, int]]:
     path = Path(os.getenv("ROUTER_DAILY_PEAK_FILE", "var/daily-peak.json"))
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return {k: v for k, v in raw.items() if k in WORKLOADS and type(v) is int and v > 0}
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            k: v
+            for k, v in raw.items()
+            if k in WORKLOADS
+            and (
+                (type(v) is int and v > 0)
+                or (
+                    isinstance(v, dict)
+                    and type(v.get("requests")) is int
+                    and v["requests"] > 0
+                    and type(v.get("tokens_per_request")) is int
+                    and v["tokens_per_request"] > 0
+                )
+            )
+        }
     except (OSError, ValueError, TypeError):
         return {}
 
@@ -85,7 +101,7 @@ def build_app(
     provider: ProviderClient | None = None,
     queue: JobQueue | None = None,
     catalog_path: Path | None = None,
-    daily_peak: dict[str, int] | None = None,
+    daily_peak: dict[str, int | dict[str, int]] | None = None,
     production_workloads: tuple[str, ...] | None = None,
     worker_enabled: bool = True,
 ) -> FastAPI:
@@ -211,10 +227,16 @@ def build_app(
     @app.get("/health")
     def health() -> dict:
         redis_ok = quota.healthy()
+        service_configured = all(workload_token(workload) for workload in WORKLOADS) and all(
+            Path(os.getenv(key, "")).is_absolute()
+            for key in ("ROUTER_QUEUE_DB", "ROUTER_VERIFIED_MODELS", "ROUTER_DAILY_PEAK_FILE")
+        )
         return {
-            "status": "ok" if redis_ok else "degraded",
+            "status": "ok" if redis_ok and service_configured else "degraded",
             "version": __version__,
+            "release": os.getenv("ROUTER_RELEASE_SHA"),
             "redis": redis_ok,
+            "service_configured": service_configured,
             "queue": queue.counts(),
         }
 
@@ -310,6 +332,8 @@ def build_app(
                 "pilot": pilot,
             },
             fingerprint,
+            planned_tokens=max(1, sum(len(m.content.encode("utf-8")) + 64 for m in body.messages))
+            + body.max_tokens,
         )
         if not inserted:
             previous = queue.get(job_id, workload)

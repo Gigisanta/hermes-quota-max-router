@@ -29,6 +29,11 @@ PROVIDERS = {
     ),
     "cloudflare": ("", "cloudflare", "CLOUDFLARE_API_TOKEN", "developers.cloudflare.com"),
 }
+NON_PERMANENT_OR_PAID_MODELS = {
+    ("novita", "inclusionai/ling-3.0-flash-fin"),
+    ("novita", "inclusionai/ling-3.0-flash-sante"),
+    ("novita", "inclusionai/ling-3.0-flash-vl"),
+}
 MAX_EVIDENCE_AGE = timedelta(days=7)
 
 
@@ -89,6 +94,8 @@ class ModelSpec:
         model = raw.get("model")
         if not isinstance(model, str) or not model or any(ch.isspace() for ch in model):
             raise ValueError("invalid_model")
+        if (provider, model) in NON_PERMANENT_OR_PAID_MODELS:
+            raise ValueError("model_not_permanently_free")
         evidence_url = raw.get("evidence_url", "")
         parsed_evidence = urlparse(evidence_url)
         host = parsed_evidence.hostname or ""

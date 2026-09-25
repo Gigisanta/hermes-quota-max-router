@@ -1,1 +1,5 @@
-{"journal": 0, "simon-news": 0, "cactus-brief": 0}
+{
+  "journal": {"requests": 0, "tokens_per_request": 0},
+  "simon-news": {"requests": 0, "tokens_per_request": 0},
+  "cactus-brief": {"requests": 0, "tokens_per_request": 0}
+}

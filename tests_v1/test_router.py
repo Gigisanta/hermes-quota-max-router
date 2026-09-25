@@ -114,6 +114,10 @@ def test_real_completion_and_distinct_reviewer(catalog, quota, tmp_path, monkeyp
         data = author.json()
         assert data["choices"][0]["message"]["content"] == '{"ok":true}'
         assert data["router"]["provider"] in {"gemini", "groq", "cloudflare"}
+        daily = client.get("/v1/router/metrics").json()["daily_requests"]
+        journal = next(row for row in daily if row["workload"] == "journal")
+        assert journal["planned_token_samples"] == journal["requests"] == 1
+        assert journal["max_planned_tokens"] >= _body()["max_tokens"]
         review = client.post(
             "/v1/chat/completions",
             json=_body("Revisá el artículo"),
@@ -179,9 +183,13 @@ def test_repeated_completion_returns_durable_result_without_new_provider_call(
 
 def test_daily_requests_count_queued_jobs_once_and_separate_utc_days(tmp_path):
     queue = JobQueue(tmp_path / "jobs.sqlite3")
-    job_id, inserted = queue.begin("journal", "author", {"body": "Dato público"}, "same")
+    job_id, inserted = queue.begin(
+        "journal", "author", {"body": "Dato público"}, "same", planned_tokens=1200
+    )
     assert inserted
-    repeated_id, inserted = queue.begin("journal", "author", {"body": "Dato público"}, "same")
+    repeated_id, inserted = queue.begin(
+        "journal", "author", {"body": "Dato público"}, "same", planned_tokens=9999
+    )
     assert not inserted and repeated_id == job_id
     queue.reschedule(job_id, 5)
     today_id = queue.enqueue("simon-news", "author", {"body": "Otro dato público"}, "other", 5)
@@ -205,6 +213,9 @@ def test_daily_requests_count_queued_jobs_once_and_separate_utc_days(tmp_path):
     assert sum(row["requests"] for row in rows) == 2
     assert {row["workload"] for row in rows} == {"journal", "simon-news"}
     assert len({row["day"] for row in rows}) == 2
+    journal = next(row for row in rows if row["workload"] == "journal")
+    assert journal["planned_token_samples"] == 1
+    assert journal["max_planned_tokens"] == 1200
 
 
 def test_exhaustion_is_durable_202_never_fake_success(catalog, quota, tmp_path, monkeypatch):
@@ -352,15 +363,18 @@ def test_openrouter_is_not_an_admitted_provider(catalog):
 
 
 @pytest.mark.asyncio
-async def test_novita_free_model_uses_documented_rest_path(catalog, monkeypatch):
+async def test_novita_transport_uses_documented_rest_path_without_admitting_temporary_model(
+    catalog, monkeypatch
+):
     raw = json.loads(catalog.read_text())["models"][0]
-    raw.update(
+    spec = replace(
+        ModelSpec.parse(raw),
         provider="novita",
         model="inclusionai/ling-3.0-flash-fin",
-        evidence_url="https://novita.ai/models/model-detail/inclusionai-ling-3.0-flash-fin",
+        api_base="https://api.novita.ai/openai/v1",
+        api_key_env="NOVITA_API_KEY",
     )
     monkeypatch.setenv("NOVITA_API_KEY", "test-key")
-    spec = ModelSpec.parse(raw)
     seen: list[str] = []
 
     def handler(request):
@@ -609,6 +623,47 @@ def test_measured_peaks_allocate_project_quota_and_preserve_deadline_reserve(cat
     ) == pytest.approx(1)
 
 
+def test_measured_request_envelope_prevents_full_context_capacity_understatement(catalog, quota):
+    raw = json.loads(catalog.read_text(encoding="utf-8"))
+    for row in raw["models"]:
+        row["quota"]["tpd"] = 20_000
+    catalog.write_text(json.dumps(raw), encoding="utf-8")
+    legacy = EditorialRouter(
+        quota,
+        FakeProvider(),
+        catalog,
+        {"journal": 2, "simon-news": 2, "cactus-brief": 2},
+    )
+    assert legacy.readiness("journal")["verified_daily_requests"] == 0
+
+    measured = EditorialRouter(
+        quota,
+        FakeProvider(),
+        catalog,
+        {
+            name: {"requests": 2, "tokens_per_request": 1000}
+            for name in ("journal", "simon-news", "cactus-brief")
+        },
+    )
+    status = measured.readiness("journal")
+    assert status["ready"]
+    assert status["planned_tokens_per_request"] == 1000
+    assert status["verified_daily_requests"] >= 4
+
+    spec = next(model for model in load_models(catalog)[0] if model.provider == "groq")
+    # Forecasting with a measured envelope never relaxes the actual Redis
+    # reservation for a request larger than its project's token share.
+    oversized = quota.reserve(
+        spec,
+        "journal",
+        5000,
+        1000,
+        provider_limits=(100, 100, 100000, 20_000),
+        workload_share=0.25,
+    )
+    assert oversized.keys == ()
+
+
 def test_boolean_peaks_never_count_as_measured_volume(catalog, quota):
     router = EditorialRouter(
         quota,
@@ -716,6 +771,22 @@ def test_cloudflare_quota_cannot_exceed_free_daily_neurons(catalog):
     models, rejected = load_models(catalog)
     assert all(model.provider != "cloudflare" for model in models)
     assert rejected["cloudflare/@cf/zai-org/glm-4.7-flash"] == "unverified_neurons"
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "inclusionai/ling-3.0-flash-fin",
+        "inclusionai/ling-3.0-flash-sante",
+        "inclusionai/ling-3.0-flash-vl",
+    ],
+)
+def test_novita_temporary_or_paid_models_cannot_join_permanent_reserve(catalog, model):
+    row = json.loads(catalog.read_text())["models"][0]
+    row["provider"] = "novita"
+    row["model"] = model
+    with pytest.raises(ValueError, match="model_not_permanently_free"):
+        ModelSpec.parse(row)
 
 
 def test_cloudflare_neurons_must_share_utc_account_window(catalog):
