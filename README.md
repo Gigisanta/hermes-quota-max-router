@@ -3,323 +3,92 @@
 
 > internal platform de MaatWork
 
-# Hermes QuotaMax Router
+# Hermes QuotaMax Router 1.0
 
-[![tests](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/tests.yml/badge.svg)](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/tests.yml)
-[![lint](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/lint.yml/badge.svg)](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/lint.yml)
-[![coverage](https://img.shields.io/badge/coverage-82%25-brightgreen.svg)](https://github.com/Gigisanta/hermes-quota-max-router/actions/workflows/tests.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![release](https://img.shields.io/github/v/release/Gigisanta/hermes-quota-max-router)](https://github.com/Gigisanta/hermes-quota-max-router/releases)
+Router editorial de costo **$0** para MaatWork. Sólo envía fuentes públicas y borradores editoriales a modelos de API gratuitos **verificados en la cuenta**. Si no hay capacidad, guarda el trabajo en SQLite y responde `202`; un worker lo reintenta. No hay respuestas simuladas, pago de emergencia ni fallback a la GPU local.
 
-OpenAI-compatible HTTP proxy that routes every request to a verified free-tier
-LLM, falls back across free providers automatically, and only touches paid
-quotas when the free pool can't satisfy the task. 546 models in the registry
-(234 confirmed free), one FastAPI server, one Gradio dashboard, one
-model-provider plugin for Hermes Agent.
+## Estado y alcance
 
-**What "confirmed free" means today:** the 4 curated models have been
-verified with real API calls; the rest are flagged free from provider
-catalog metadata (price `$0.00` on OpenRouter, ungated + hosted inference
-on Hugging Face). A continuous re-verification loop is on the
-[roadmap](#roadmap) — models that start billing get demoted automatically.
+El servicio arranca en `127.0.0.1:8123`. Arrancar no lo vuelve productivo: cada carga requiere adopción explícita tras el piloto y, en su primera petición productiva, **cuatro proveedores independientes** (tres de rotación y uno de reserva), dos opciones para autor/revisor y una cuota diaria total de al menos 2× el pico medido. La activación se registra en Redis persistente. Si después baja la reserva, el router avisa y sigue probando los proveedores gratuitos todavía aptos; encola al agotarse todos. Cada modelo necesita evidencia vigente de costo facturable cero en esa cuenta (tarifa cero o cupo Free con corte duro), ausencia de facturación, cuotas reales, smoke y evaluación editorial. Una entrada inválida se muestra en `/v1/router/status` pero no enruta. Ningún operador externo puede garantizar acceso gratuito perpetuo: la garantía local es cola duradera y reanudación cuando vuelve una ruta apta.
 
-## 5-minute quickstart
+Al **25 de septiembre de 2026** hay cuatro altas MaatWork con credencial: Gemini,
+SimpleLLM, Groq y Final Router. Las tres primeras pasaron pruebas de acceso
+gratuito; Final Router permanece aislado por una restricción de modelos que no
+se aplicó. **Todavía hay 0 de 4 proveedores admitidos por carga.** El
+[inventario ordenado de modelos, cuotas y evidencia](docs/PROVIDER-STATUS.md#cuentas-de-maatwork-ordenadas-por-evidencia-editorial)
+distingue lo probado de lo anunciado y de los candidatos sin alta. El orden
+productivo se calculará por calidad editorial de cada carga y etapa cuando
+exista una comparación suficiente; no se infiere del tamaño del modelo.
 
-```bash
-git clone https://github.com/Gigisanta/hermes-quota-max-router.git
-cd hermes-quota-max-router
+Freebuff **no** es un backend: [sus términos](https://freebuff.com/terms-of-service) limitan el uso gratuito a interacciones humanas en la app. GLM-5.3-Flash es [pago vía API](https://docs.z.ai/guides/overview/pricing). El catálogo de [Free-LLM](https://github.com/nejib1/Free-LLM) sirve para descubrir candidatos, nunca para autorizar precios o cuotas.
 
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+## Instalación local
 
-cp .env.example .env
-# edit .env — at minimum set GEMINI_API_KEY=...
-
-python scripts/run_router_live.py
-# → http://127.0.0.1:8088  (router)  +  http://127.0.0.1:7860  (dashboard)
+```sh
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+# Exportar variables del almacén del proyecto antes de servir; no usar keys de otros proyectos.
+.venv/bin/quotamax status
+.venv/bin/quotamax serve
 ```
 
-Sanity check, in another terminal:
+La aplicación no lee archivos `.env` por sí sola. Usá `~/.hermes/project-env/HerMaatOS/work/hermes-quota-max-router/` para las claves propias y exportalas al proceso de forma segura. `.env.example` enumera **nombres**, nunca valores. Necesita Redis local con AOF activado, `appendfsync always` y `maxmemory-policy noeviction`, una sola instancia de Uvicorn y espacio para `var/queue.sqlite3` (modo `0600`). Si Redis cae o pierde esas garantías, la cola sigue aceptando trabajos pero no hay inferencia: un reinicio no puede borrar reservas de cuota y habilitar consumo de más. No expongas `:8123` fuera de loopback.
 
-```bash
-curl -s http://127.0.0.1:8088/v1/router/health
-# {"status":"ok","version":"0.2.0","live_mode":true,"models_count":546,...}
+### Servicio persistente en este Mac
+
+Con los cambios revisados y confirmados en un commit, `scripts/install_service.py` instala un snapshot de ese commit en `~/.hermes/services/free-router/releases/<sha>`, crea un entorno Python propio y registra `com.hermaat.free-router` en launchd. Guarda la cola y el catálogo fuera del checkout. En la primera instalación crea tres tokens distintos de cliente y las rutas de estado en `~/.hermes/project-env/HerMaatOS/work/hermes-quota-max-router/.env` con modo `0600`; las claves de proveedores se agregan allí sólo después de cada alta legítima. La lectura del archivo no ejecuta shell y el plist no contiene secretos.
+
+```sh
+.venv/bin/python scripts/install_service.py install
+curl -fsS http://127.0.0.1:8123/health
+curl -fsS http://127.0.0.1:8123/v1/router/status
+launchctl print gui/$(id -u)/com.hermaat.free-router
 ```
 
-First chat completion:
+El instalador requiere Python 3.11.4 o posterior, Redis sano y el puerto libre. Comprueba que el proceso arrancó desde el commit instalado con los tres tokens de cliente y rutas de estado absolutas; revierte el plist si falla. Al actualizar conserva las claves existentes y agrega las rutas o tokens faltantes. Si un archivo privado anterior usa rutas relativas, se detiene para migrarlas explícitamente antes de mover la cola. En la primera instalación también rechaza un archivo previo que ya tenga cargas activas o modo piloto, para revisar esa adopción antes de arrancar el servicio. La instalación inicial escribe `ROUTER_PRODUCTION_WORKLOADS=` y `ROUTER_PILOT_MODE=0`: el proceso puede servir salud y déficit de reserva, pero ninguna carga editorial se considera adoptada. Tras superar **todas** las compuertas del piloto, actualizá la lista de cargas en el archivo privado y reiniciá con `launchctl kickstart -k gui/$(id -u)/com.hermaat.free-router`. El mismo comando de instalación despliega otro commit sin rotar los tokens existentes.
 
-```bash
-curl -s -X POST http://127.0.0.1:8088/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "auto",
-    "messages": [{"role": "user", "content": "Reply with just the word OK"}],
-    "max_tokens": 5
-  }'
+## Admisión de proveedores
+
+1. Crear una única cuenta legítima por proveedor con MaatWork; no añadir tarjeta, crédito ni recarga automática. Verificar que las condiciones permiten API automatizada para contenido editorial público. [Gemini Free](https://ai.google.dev/gemini-api/terms) puede usar entradas y respuestas para mejorar productos y prohíbe enviar información sensible o confidencial: no se le envía chat, información personal ni borradores bajo embargo o confidenciales.
+2. Guardar la clave en el almacén del proyecto. Registrar en `var/verified-models.json` cada modelo con costo facturable cero en la cuenta y URL oficial, cuota exacta por minuto/día, contexto, fecha de comprobación, smoke real, evaluación editorial y cargas autorizadas. Para cada carga y etapa autorizada, `quality_evaluations` exige casos aprobados/totales, fecha y SHA-256 del conjunto de evaluación; la muestra mínima es 60 casos de Journal, 50 de Simón y 10 de Cactus. Todos los modelos comparados en una carga y etapa deben usar el mismo conjunto **y la misma cantidad de casos**. La evidencia de calidad vence a los 30 días. El archivo de ejemplo es intencionalmente inválido. Para SimpleLLM, registrar además `rph` y `tph` comprobados en la cuenta: el router reserva atómicamente esas ventanas horarias y las incluye al calcular la capacidad diaria. Coordina una sola solicitud SimpleLLM en curso entre procesos mediante Redis, una cota conservadora mientras el límite efectivo de concurrencia de la cuenta no esté verificado. Para Cloudflare, añadir `daily_neurons` y las tasas oficiales `neurons_per_million_input/output`; no seleccionar modelos que requieran Workers Paid.
+3. Registrar en `var/daily-peak.json` los picos diarios y la máxima reserva de tokens por petición medidos en el piloto (ver [docs/PILOT.md](docs/PILOT.md)). `quotamax status` muestra el margen de capacidad y los motivos que impiden activar cada carga. Las atestaciones vencen a los siete días: el servicio falla cerrado hasta renovarlas.
+4. `quotamax audit` extrae nombres del directorio Free-LLM como entradas **sin verificar**, identifica nombres nuevos incluso después de una caída del directorio y muestra la lista curada en `config/provider-watchlist.json`. Esa lista indica el próximo paso, fuentes oficiales y revisiones vencidas; no suma capacidad. La auditoría reserva cuota para hacer una petición real mínima a cada modelo admitido y comprueba una afirmación editorial simple. El servicio la repite cada 24 horas. El reporte guarda sólo resultados, sin texto. Esa prueba de humo **no** sustituye la evaluación editorial ni confirma precio, cuota o facturación. Esos datos deben verificarse en las fuentes oficiales y en la cuenta antes de registrar cada modelo; la atestación vence a los siete días. El directorio Free-LLM nunca autoriza modelos por sí mismo, aun si muestra un precio gratuito.
+5. Tras superar los siete días, la revisión editorial, USD 0 facturados y la reducción de GPU, agregar sólo las cargas aprobadas a `ROUTER_PRODUCTION_WORKLOADS` (separadas por comas) y reiniciar el servicio. La primera petición no piloto aún exige la reserva completa y registra su activación duradera. Quitar una carga de esa variable la desactiva sin borrar su cola. `/v1/router/status` distingue adopción/activación de salud actual de la reserva.
+
+La cuota diaria se divide según los picos medidos de los tres proyectos, con al menos una cuarta parte reservada a Cactus por su plazo. La disponibilidad descuenta tanto solicitudes como tokens y, en Cloudflare, Neurons. Ante agotamiento, el próximo intento se programa para el reinicio de la ventana de cuota o el `Retry-After` aplicable.
+
+Entre modelos admitidos, el router intenta primero el de mejor límite inferior de calidad editorial (Wilson 95 %) para la carga y etapa concretas; después usa la fracción de cuota restante para desempatar. Mantiene las rutas de reserva detrás de las activas y excluye el proveedor usado por el autor al elegir revisor. `/v1/router/status` muestra el orden de preferencia sin cuota en vivo, la brecha numérica de reserva y el backlog de candidatos. El orden de un intento puede cambiar por contexto, cuota, cooldown o exclusión del autor. Un puntaje alto no reemplaza los gates de calidad ni habilita por sí mismo el modelo.
+
+El [inventario de proveedores](docs/PROVIDER-STATUS.md) separa las cuentas
+registradas de candidatos sin acceso verificado. La cuarta ruta independiente
+más prometedora es [Cloudflare Workers AI Free](https://developers.cloudflare.com/workers-ai/platform/pricing/), pendiente de alta MaatWork, token limitado y prueba real de sus 10.000 Neurons diarios sin facturación. [SiliconFlow](https://docs.siliconflow.cn/docs/userguide/faqs/rate-limit-and-upgradation) requiere verificación de identidad; [Vikasit Nova](https://vikasit.ai/inference) aún tiene condiciones legales provisionales y acceso no probado. Final Router tiene cuenta y cupo gratuito, pero queda fuera del servicio mientras su guardrail permita un modelo excluido. Una clave guardada no equivale a admisión. [OpenRouter](https://openrouter.ai/terms) queda excluido por su cláusula 7(4) sobre desarrollar un servicio competidor; sólo se reconsidera con autorización escrita del operador. Créditos temporales, modelos con tarifa positiva fuera de un límite duro de plan Free y anuncios sin cuota de cuenta no suman reserva.
+
+[Z.ai](https://docs.z.ai/legal-agreement/terms-of-use) queda excluido de estas cargas porque sus términos incluyen una restricción sobre *news reporting* e inversión. [Mistral Free](https://docs.mistral.ai/admin/billing-usage/subscriptions) proporciona un uso mensual incluido que se consume contra precios por modelo; no se admite como tarifa cero. [SambaNova Free](https://cloud.sambanova.ai/plans) exige método de pago y compra de créditos para las primeras peticiones, así que tampoco cuenta como reserva gratuita. Si cambian los términos o el precio, se vuelve a evaluar antes de habilitarlos.
+
+## API
+
+Cada proyecto tiene su token de servidor `ROUTER_TOKEN_JOURNAL`, `ROUTER_TOKEN_SIMON_NEWS` o `ROUTER_TOKEN_CACTUS_BRIEF`. El cliente usa el mismo valor como Bearer. Sólo se acepta `model: "auto"`, texto y respuestas no streaming.
+
+```sh
+curl http://127.0.0.1:8123/v1/chat/completions \
+  -H "Authorization: Bearer $MAAT_FREE_ROUTER_TOKEN" \
+  -H 'X-Maat-Workload: journal' \
+  -H 'X-Maat-Stage: author' \
+  -H 'X-Maat-Data-Class: public_editorial' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","messages":[{"role":"user","content":"Resumí esta fuente pública: ..."}],"max_tokens":500}'
 ```
 
-```json
-{
-  "id": "chatcmpl-1781235135764",
-  "object": "chat.completion",
-  "model": "gemini/gemini-2.5-flash",
-  "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"},
-               "finish_reason": "stop"}],
-  "usage": {"prompt_tokens": 7, "completion_tokens": 23, "total_tokens": 30},
-  "router_decision": {"chosen_strategy": "direct", "primary_model": "gemini/gemini-2.5-flash", ...}
-}
+`200` incluye `router.provider`, `router.model`, `router.job_id`, `usage` y contenido real. Para la etapa `reviewer`, enviar `X-Maat-Author-Provider` y `X-Maat-Author-Job` con los valores efectivos de la respuesta del autor; el router consulta su trabajo completado, comprueba esa identidad y excluye el proveedor. `202` incluye `id`, `Retry-After` y `Location`; consultar `GET /v1/jobs/{id}` con el mismo token/carga. El resultado completado del trabajo también incluye `router.job_id`. `GET /health`, `/v1/models` y `/v1/router/status` muestran salud, modelos admitidos y déficit de reserva. `GET /v1/router/metrics` informa eventos agregados, cola y trabajos únicos aceptados por día UTC y carga (`daily_requests`), incluidos pendientes; cada fila informa `planned_token_samples` y `max_planned_tokens` sin contenido ni secretos. El servidor rechaza patrones evidentes de datos personales y peticiones mayores a 128 KiB, y los adaptadores deben admitir sólo fuentes públicas y borradores editoriales. La cola no registra contenido en logs, conserva pendientes hasta completarlos y purga resultados completados después de siete días.
+
+Para una calibración no publicable con menos de cuatro proveedores, iniciar con `ROUTER_PILOT_MODE=1` y mandar `X-Maat-Pilot: true`. Nunca activar ese modo en una ruta de publicación. Al desactivar la variable, los trabajos piloto pendientes quedan suspendidos en cola aunque esa carga esté adoptada en producción. La publicación de cada proyecto mantiene sus propios gates.
+
+## Verificación
+
+El procedimiento de comparación de siete días y sus criterios de adopción están en [docs/PILOT.md](docs/PILOT.md). El estado de altas, modelos y cuotas comprobadas al 2026-09-25 está en [docs/PROVIDER-STATUS.md](docs/PROVIDER-STATUS.md).
+
+```sh
+make lint type-check test
 ```
 
-## Live mode
-
-`scripts/run_router_live.py` sets `ROUTER_LIVE=1` and reads `GEMINI_API_KEY`
-from the environment (loaded from `.env` by `python-dotenv` at server startup).
-Without it the router still answers — every chat completion comes back with a
-`[stub: ...]` placeholder so you can smoke-test routing logic without burning
-real tokens.
-
-| Env var               | Default                      | Effect                                                     |
-|-----------------------|------------------------------|------------------------------------------------------------|
-| `ROUTER_LIVE`         | `0`                          | `1` enables real LiteLLM calls; `0` returns stubs          |
-| `ROUTER_PORT`         | `8088`                       | HTTP port (matches the Hermes plugin default)              |
-| `ROUTER_MASTER_KEY`   | unset                        | If set, requires `Authorization: Bearer <key>` on `/v1/*`  |
-| `GEMINI_API_KEY`      | unset                        | Required in live mode for the Gemini model family          |
-| `DEEPSEEK_API_KEY`    | unset                        | Optional, enables DeepSeek fallback                        |
-| `OPENROUTER_API_KEY`  | unset                        | Optional, broadens the fallback pool                       |
-| `GROQ_API_KEY`        | unset                        | Optional, fast Llama inference                             |
-| `TOGETHER_API_KEY`    | unset                        | Optional                                                    |
-| `FIREWORKS_API_KEY`   | unset                        | Optional                                                    |
-| `SILICONFLOW_API_KEY` | unset                        | Optional, Chinese / Qwen / DeepSeek mirrors                |
-| `OPENAI_API_KEY`      | unset                        | Paid — touched only when no free model fits                |
-| `ANTHROPIC_API_KEY`   | unset                        | Paid                                                        |
-| `REDIS_URL`           | `redis://localhost:6379/0`   | Quota state; `fakeredis` is used automatically in tests    |
-
-Launcher exit semantics: with `ROUTER_LIVE=1` and no `GEMINI_API_KEY` the
-server still starts, but `/v1/chat/completions` will degrade to stubs once
-the orchestrator has no live upstream to call.
-
-## Demo
-
-The running server is real. Hit it with a routing decision you didn't make
-yourself — pass `model: "auto"` and watch the response header include the
-chosen model plus a `router_decision` block:
-
-```bash
-curl -s -X POST http://127.0.0.1:8088/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "auto",
-    "messages": [
-      {"role": "system", "content": "You are a terse assistant."},
-      {"role": "user",   "content": "What is 2+2?"}
-    ]
-  }' | python3 -m json.tool
-```
-
-## Streaming + tool-calling
-
-The endpoint is OpenAI-compatible — drop in any OpenAI client pointed at
-`http://127.0.0.1:8088/v1`.
-
-Streaming (Server-Sent Events):
-
-```bash
-curl -N -s -X POST http://127.0.0.1:8088/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "auto",
-    "stream": true,
-    "messages": [{"role": "user", "content": "List three colors, one per line."}]
-  }'
-# data: {"id":"chatcmpl-...","object":"chat.completion.chunk", ...}
-# data: [DONE]
-```
-
-Tool-calling (OpenAI function-calling schema):
-
-```bash
-curl -s -X POST http://127.0.0.1:8088/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "auto",
-    "messages": [{"role": "user", "content": "What is the weather in Madrid?"}],
-    "tools": [{
-      "type": "function",
-      "function": {
-        "name": "get_weather",
-        "description": "Get current weather for a city",
-        "parameters": {
-          "type": "object",
-          "properties": {"city": {"type": "string"}},
-          "required": ["city"]
-        }
-      }
-    }],
-    "tool_choice": "auto"
-  }'
-```
-
-When the model decides to call a tool, the response carries
-`choices[0].message.tool_calls` in standard OpenAI shape. When a tool result
-comes back, append it as a `role: "tool"` message and re-call.
-
-## Endpoints
-
-| Method | Path                       | Purpose                                          |
-|--------|----------------------------|--------------------------------------------------|
-| GET    | `/v1/models`               | All models in the registry (`is_free` per model) |
-| POST   | `/v1/chat/completions`     | OpenAI-compatible chat (supports `stream`, `tools`, `tool_choice`, `session_id`) |
-| GET    | `/v1/router/health`        | Liveness, version, live/stub mode, registry stats |
-| GET    | `/v1/router/quota`         | Per-model quota snapshots (total, remaining, %)  |
-| GET    | `/v1/router/cost`          | Cost tracker summary                             |
-| GET    | `/v1/router/budget`        | Budget monitor                                   |
-| GET    | `/v1/router/sessions`      | Active multi-turn sessions                       |
-| GET    | `/v1/router/metrics`       | Prometheus exposition                            |
-
-Auth is optional: set `ROUTER_MASTER_KEY` and pass
-`Authorization: Bearer <key>`. Rate limit is 60 requests / IP, refilling
-at 1 req/s.
-
-## Hermes integration
-
-Three steps. Idempotent — safe to re-run.
-
-```bash
-# 1. Install the model-provider plugin
-python scripts/install_hermes_plugin.py
-# symlinks scripts/hermes_plugin/quotamax-router/  →  ~/.hermes/plugins/model-providers/quotamax-router/
-# patches ~/.hermes/config.yaml to add auxiliary.quotamax_subagent + delegation.subagent_models.quotamax
-# verifies the plugin is discovered and fetch_models() works
-```
-
-Confirm the plugin is live:
-
-```bash
-hermes plugins list --plain | grep quotamax
-# → enabled   user   0.1.0   quotamax-router
-```
-
-Confirm the sub-agent is registered:
-
-```bash
-hermes config show | grep -A 8 quotamax_subagent
-```
-
-The two config keys it adds (also documented in `docs/HERMES_INTEGRATION.md`):
-
-```yaml
-auxiliary:
-  quotamax_subagent:
-    provider: quotamax-router
-    model: auto
-    base_url: ${QUOTAMAX_BASE_URL:-http://127.0.0.1:8088/v1}
-    api_key: ${QUOTAMAX_API_KEY:-}
-    api_mode: chat_completions
-    timeout: 60
-    extra_body: {}
-
-delegation:
-  subagent_models:
-    quotamax: quotamax-router/auto
-```
-
-A 6-hour self-test cron is recommended (the project ships
-`scripts/healthcheck.py`):
-
-```bash
-# one-shot
-python scripts/healthcheck.py --once
-
-# daemon (logs/alerts.jsonl on failure)
-python scripts/healthcheck.py --daemon
-```
-
-Uninstall reverses everything:
-
-```bash
-python scripts/install_hermes_plugin.py --uninstall
-```
-
-## Architecture
-
-One process, four layers. HTTP in, LiteLLM out, quota ledger in Redis (or
-fakeredis in tests), and a JSONL append-only call log on disk.
-
-```
-   ┌───────────────────────────────────────────────────────────────┐
-   │  OpenAI-compatible client  (curl, openai-python, Hermes)      │
-   └───────────────────────────────┬───────────────────────────────┘
-                                   │ POST /v1/chat/completions
-                                   ▼
-   ┌───────────────────────────────────────────────────────────────┐
-   │  server/app.py         FastAPI: auth, rate-limit, SSE, schemas│
-   └───────────────────────────────┬───────────────────────────────┘
-                                   │
-                                   ▼
-   ┌───────────────────────────────────────────────────────────────┐
-   │  core/router_engine.py RouterEngine                           │
-   │    analyze → task_analyzer (heuristic)                        │
-   │    route   → orchestrator (rule or LLM)                       │
-   │    execute → litellm.completion | moa_engine (parallel fanout)│
-   │    consume→ quota_manager   log → logs/router.jsonl           │
-   └────┬──────────────┬──────────────┬────────────────┬──────────┘
-        │              │              │                │
-        ▼              ▼              ▼                ▼
-   model_registry  quota_manager   moa_engine     auto_updater
-   (SQLite+JSON)   (Redis)         (asyncio)      (periodic feed merge)
-        │
-        ▼
-   registry/models.json  (546 models, 234 free)
-```
-
-## Docker
-
-```bash
-cp .env.example .env   # set at least one provider key
-docker compose up --build
-# router on http://127.0.0.1:8080 + Redis-backed quota state
-```
-
-## Examples
-
-Runnable examples (curl, httpx, SSE streaming, openai SDK, quota status)
-live in [`examples/`](examples/). Each one works against a local server
-started with `python -m server.app`.
-
-## Testing
-
-```bash
-python -m pytest tests/ -q
-# 272 passed in ~20s
-```
-
-Coverage spans unit tests for the registry, orchestrator, quota manager,
-MoA engine, and security layer, plus end-to-end tests that hit the FastAPI
-server in stub mode.
-
-## Roadmap
-
-- **PyPI package** — `pip install hermes-quota-max-router` (the `pyproject.toml` is ready; publishing is the remaining step)
-- **Provider auto-verification loop** — periodically re-probe the 234 "confirmed free" models and demote the ones that started billing
-- **Multi-key rotation per provider** — spread free-tier quota across several API keys
-- **Streaming tool-calls** — tool deltas in the SSE path (blocking path already supports tools)
-- **OpenAI Responses API compatibility** — alongside the current Chat Completions surface
-
-Issues and PRs welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## Where to go next
-
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full layer diagram and module map
-- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — operator tasks (rotate keys, reset quota, force update)
-- [`docs/PROVIDERS.md`](docs/PROVIDERS.md) — what each provider gives you, free vs. paid
-- [`docs/HERMES_INTEGRATION.md`](docs/HERMES_INTEGRATION.md) — deeper plugin + sub-agent reference
-- [`CHANGELOG.md`](CHANGELOG.md) — release notes
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — dev setup, style, PR checklist
-- [`SECURITY.md`](SECURITY.md) — how to report vulnerabilities
-- [`CITATION.cff`](CITATION.cff) — cite this project
-
-## License
-
-[MIT](LICENSE) © Giolivo Santarelli
+Las pruebas usan Redis falso con Lua y HTTP simulado; no consumen cuota ni tocan producción. El código anterior se conserva sólo en historial Git. No usar sus scripts, catálogos, LiteLLM, Gradio ni endpoints de `:8088`.

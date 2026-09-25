@@ -1,0 +1,140 @@
+{
+  "providers": [
+    {
+      "id": "gemini",
+      "operator": "Gemini",
+      "state": "editorial_pending",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "Evaluar autor y revisor por carga; medir siete días y renovar precio, cuota y facturación de la cuenta.",
+      "official_urls": ["https://ai.google.dev/gemini-api/docs/pricing", "https://ai.google.dev/gemini-api/docs/rate-limits"]
+    },
+    {
+      "id": "simplellm",
+      "operator": "SimpleLLM",
+      "state": "editorial_pending",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "Evaluar artículos y briefs reales por carga; volver a comprobar ventanas horarias, precio cero y uso de la cuenta.",
+      "official_urls": ["https://simplellm.eu/docs/models.html", "https://simplellm.eu/docs/limits.html"]
+    },
+    {
+      "id": "groq",
+      "operator": "Groq",
+      "state": "editorial_pending",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "Completar evaluación editorial de autor y revisor por carga; medir siete días y renovar acceso, plan Free y cuotas de la cuenta.",
+      "official_urls": ["https://console.groq.com/docs/rate-limits", "https://console.groq.com/docs/billing-faqs"]
+    },
+    {
+      "id": "cloudflare",
+      "operator": "Cloudflare",
+      "state": "onboarding",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "Completar alta consentida, comprobar Workers Free sin facturación, crear token acotado y medir Neurons por modelo.",
+      "official_urls": ["https://developers.cloudflare.com/workers-ai/platform/pricing/", "https://developers.cloudflare.com/changelog/post/2026-07-28-models-require-workers-paid/"]
+    },
+    {
+      "id": "siliconflow",
+      "operator": "SiliconFlow",
+      "state": "onboarding",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El titular debe decidir si completa la verificación de identidad requerida; después comprobar cuenta, cuotas y calidad.",
+      "official_urls": ["https://docs.siliconflow.cn/docs/userguide/faqs/rate-limit-and-upgradation", "https://docs.siliconflow.cn/docs/legals/privacy-policy"]
+    },
+    {
+      "id": "vikasit",
+      "operator": "Vikasit",
+      "state": "research",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "Revisar términos definitivos y disponibilidad del alta; verificar que el cupo diario permite este uso editorial comercial.",
+      "official_urls": ["https://vikasit.ai/inference", "https://vikasit.ai/terms"]
+    },
+    {
+      "id": "finalrouter",
+      "operator": "Final Router",
+      "state": "onboarding",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "Bloqueo de admisión: un guardrail asignado a la clave permite sólo GPT-5 mini, excluye proveedores que entrenan con prompts y limita gasto a USD 0, pero dos solicitudes sintéticas explícitas a DeepSeek devolvieron 200. Investigar y comprobar que la restricción se aplique realmente antes de enviar borradores editoriales; luego evaluar calidad y capacidad diaria.",
+      "official_urls": ["https://finalrouter.com/free-models", "https://finalrouter.com/pricing", "https://finalrouter.com/api-reference", "https://finalrouter.com/terms"]
+    },
+    {
+      "id": "openrouter",
+      "operator": "OpenRouter",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "No integrar sin permiso escrito del operador para un router compartido.",
+      "official_urls": ["https://openrouter.ai/terms"]
+    },
+    {
+      "id": "mistral",
+      "operator": "Mistral",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "No contar créditos mensuales como tarifa cero por modelo.",
+      "official_urls": ["https://docs.mistral.ai/admin/billing-usage/subscriptions"]
+    },
+    {
+      "id": "baidu-qianfan",
+      "operator": "Baidu Qianfan",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El cupón actual no acredita capacidad permanente; además revisar el acuerdo de experiencia antes de uso editorial.",
+      "official_urls": ["https://cloud.baidu.com/doc/qianfan/index.html", "https://ai.baidu.com/ai-doc/WENXINWORKSHOP/Rlgujm1c6"]
+    },
+    {
+      "id": "ibm-watsonx",
+      "operator": "IBM watsonx.ai",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El nivel Lite evaluativo y sus límites contradictorios no acreditan producción editorial gratuita continua.",
+      "official_urls": ["https://www.ibm.com/docs/en/watsonx/saas?topic=watsonx-faq", "https://cloud.ibm.com/docs/account?topic=account-accountfaqs"]
+    },
+    {
+      "id": "nebius",
+      "operator": "Nebius Token Factory",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El crédito promocional inicial no es un modelo de tarifa cero permanente.",
+      "official_urls": ["https://nebius.com/token-factory/prices", "https://nebius.com/builders-terms-and-conditions"]
+    },
+    {
+      "id": "fireworks",
+      "operator": "Fireworks AI",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El crédito inicial se agota y la API cobra por uso; no cuenta como reserva.",
+      "official_urls": ["https://fireworks.ai/pricing"]
+    },
+    {
+      "id": "deepinfra",
+      "operator": "DeepInfra",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El catálogo cobra por token y los términos restringen usos competitivos.",
+      "official_urls": ["https://deepinfra.com/", "https://deepinfra.com/terms"]
+    },
+    {
+      "id": "jina",
+      "operator": "Jina AI",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "Embeddings y reranking no sustituyen una API de generación editorial; revisar documentación tras adquisición por Elastic.",
+      "official_urls": ["https://jina.ai/embeddings/", "https://jina.ai/legal"]
+    },
+    {
+      "id": "featherless",
+      "operator": "Featherless AI",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "El plan con API y automatización es pago.",
+      "official_urls": ["https://featherless.ai/pricing", "https://featherless.ai/terms"]
+    },
+    {
+      "id": "modal",
+      "operator": "Modal",
+      "state": "excluded",
+      "checked_at": "2026-09-25T00:00:00Z",
+      "next_step": "Shared Endpoints cobra por token, incluso con créditos generales del plan.",
+      "official_urls": ["https://modal.com/docs/guide/shared-endpoints"]
+    }
+  ]
+}

@@ -1,0 +1,503 @@
+"""Atomic account/model reservations; Redis outage means no inference."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any
+from uuid import uuid4
+from zoneinfo import ZoneInfo
+
+import redis
+
+from free_router.config import ModelSpec
+
+_RESERVE = """
+for i=1,#KEYS do
+  local p=(i-1)*3
+  local current=tonumber(redis.call('GET',KEYS[i]) or '0')
+  if current+tonumber(ARGV[p+1])>tonumber(ARGV[p+2]) then return i end
+end
+for i=1,#KEYS do
+  local p=(i-1)*3
+  redis.call('INCRBY',KEYS[i],ARGV[p+1])
+  if redis.call('TTL',KEYS[i])<0 then redis.call('EXPIRE',KEYS[i],ARGV[p+3]) end
+end
+return 0
+"""
+_ADJUST = """
+for i=1,#KEYS do
+  if redis.call('EXISTS',KEYS[i])==1 then
+    local current=tonumber(redis.call('GET',KEYS[i]) or '0')
+    local delta=tonumber(ARGV[i])
+    local updated=math.max(0,current+delta)
+    if updated==0 then
+      redis.call('DEL',KEYS[i])
+    else
+      redis.call('SET',KEYS[i],updated,'KEEPTTL')
+    end
+  end
+end
+return 1
+"""
+_RELEASE_SLOT = """
+if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end
+return 0
+"""
+
+
+@dataclass(frozen=True)
+class Reservation:
+    keys: tuple[str, ...]
+    costs: tuple[int, ...]
+    retry_after: int = 0
+
+
+ProviderLimits = tuple[int, int, int, int] | tuple[int, int, int, int, int | None, int | None]
+
+
+def _day_window(now: datetime, tz: str) -> tuple[str, int]:
+    local = now.astimezone(ZoneInfo(tz))
+    next_day = datetime.combine(
+        local.date() + timedelta(days=1), datetime.min.time(), tzinfo=ZoneInfo(tz)
+    )
+    return local.date().isoformat(), max(1, math.ceil(next_day.timestamp() - now.timestamp()))
+
+
+def _hour_window(now: datetime) -> tuple[int, int]:
+    """Use one shared UTC hour bucket for a provider account and its models."""
+    second = int(now.timestamp())
+    return second // 3600, max(1, 3601 - second % 3600)
+
+
+class QuotaStore:
+    def __init__(self, client: redis.Redis, *, require_durable: bool = True):
+        self.client: Any = client
+        self.require_durable = require_durable
+
+    def healthy(self) -> bool:
+        """A restarted or evicting Redis must not erase today's quota ledger."""
+        try:
+            if not self.client.ping():
+                return False
+            if not self.require_durable:
+                return True
+            settings = {
+                key: self.client.config_get(key).get(key)
+                for key in ("appendonly", "appendfsync", "maxmemory-policy")
+            }
+            persistence = self.client.info("persistence")
+            return (
+                settings
+                == {
+                    "appendonly": "yes",
+                    "appendfsync": "always",
+                    "maxmemory-policy": "noeviction",
+                }
+                and persistence.get("aof_enabled") == 1
+                and persistence.get("aof_last_write_status") == "ok"
+            )
+        except redis.RedisError:
+            return False
+
+    def _require_healthy(self) -> None:
+        if not self.healthy():
+            raise RuntimeError("quota_store_unavailable")
+
+    def provider_slot_available(self, provider: str) -> bool:
+        """A conservative single-flight guard for providers without a verified slot count."""
+        self._require_healthy()
+        try:
+            return self.client.exists(f"fr:v1:inflight:{provider}") == 0
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+
+    def acquire_provider_slot(self, provider: str) -> str | None:
+        """Acquire one cross-process inference slot, released by token or lease expiry."""
+        self._require_healthy()
+        token = uuid4().hex
+        try:
+            acquired = self.client.set(f"fr:v1:inflight:{provider}", token, nx=True, ex=180)
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+        self._require_healthy()
+        return token if acquired else None
+
+    def release_provider_slot(self, provider: str, token: str) -> None:
+        """Never release a later caller's slot if our lease has expired."""
+        try:
+            self.client.eval(_RELEASE_SLOT, 1, f"fr:v1:inflight:{provider}", token)
+        except redis.RedisError:
+            pass  # Lease expiry closes the slot if Redis disappears mid-request.
+
+    def production_activated(self, workload: str) -> bool:
+        """Read the durable record of a workload's first four-provider admission."""
+        self._require_healthy()
+        try:
+            return self.client.exists(f"fr:v1:production-activated:{workload}") == 1
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+
+    def activate_production(self, workload: str) -> None:
+        """Latch admission; callers must check reserve readiness before this write."""
+        self._require_healthy()
+        try:
+            self.client.set(
+                f"fr:v1:production-activated:{workload}",
+                datetime.now(UTC).isoformat(),
+                nx=True,
+            )
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+        self._require_healthy()
+
+    @classmethod
+    def from_url(cls, url: str) -> QuotaStore:
+        client = redis.Redis.from_url(url, decode_responses=True, socket_timeout=2)
+        store = cls(client)
+        store._require_healthy()
+        return store
+
+    def reserve(
+        self,
+        spec: ModelSpec,
+        workload: str,
+        input_tokens: int,
+        output_tokens: int,
+        *,
+        provider_limits: ProviderLimits | None = None,
+        workload_share: float | None = None,
+        now: datetime | None = None,
+    ) -> Reservation:
+        self._require_healthy()
+        now = now or datetime.now(UTC)
+        q = spec.quota
+        minute = int(now.timestamp() // 60)
+        hour, hour_ttl = _hour_window(now)
+        day, day_ttl = _day_window(now, q.reset_tz)
+        minute_ttl = max(1, 61 - int(now.timestamp()) % 60)
+        total = input_tokens + output_tokens
+        limits: ProviderLimits = (
+            provider_limits
+            if provider_limits is not None
+            else (q.rpm, q.rpd, q.tpm, q.tpd, q.rph, q.tph)
+        )
+        provider_rph = limits[4] if len(limits) > 4 else q.rph
+        provider_tph = limits[5] if len(limits) > 5 else q.tph
+        if workload_share is None:
+            workload_share = 0.5 if workload == "cactus-brief" else 0.25
+        if not 0 < workload_share <= 1:
+            raise ValueError("invalid_workload_share")
+
+        # Keep ten percent below the account's verified ceilings for uncertainty.
+        def cap(n: int) -> int:
+            return max(1, int(n * 0.9))
+
+        account = f"fr:v1:{spec.provider}"
+        model = f"{account}:{spec.model}"
+        windows: list[tuple[str, int, int, int]] = [
+            (f"{account}:rpm:{minute}", 1, cap(limits[0]), minute_ttl),
+            (f"{account}:rpd:{day}", 1, cap(limits[1]), day_ttl),
+            (f"{account}:tpm:{minute}", total, cap(limits[2]), minute_ttl),
+            (f"{account}:tpd:{day}", total, cap(limits[3]), day_ttl),
+            (f"{model}:rpm:{minute}", 1, cap(q.rpm), minute_ttl),
+            (f"{model}:rpd:{day}", 1, cap(q.rpd), day_ttl),
+            (f"{model}:tpm:{minute}", total, cap(q.tpm), minute_ttl),
+            (f"{model}:tpd:{day}", total, cap(q.tpd), day_ttl),
+        ]
+        if q.rph is not None and q.tph is not None:
+            assert provider_rph is not None and provider_tph is not None
+            windows.extend(
+                (
+                    (f"{account}:rph:{hour}", 1, cap(provider_rph), hour_ttl),
+                    (f"{account}:tph:{hour}", total, cap(provider_tph), hour_ttl),
+                    (f"{model}:rph:{hour}", 1, cap(q.rph), hour_ttl),
+                    (f"{model}:tph:{hour}", total, cap(q.tph), hour_ttl),
+                )
+            )
+        # Every workload has its own ceiling. The deadline brief retains a
+        # guaranteed share even when the other editorial queues are busy.
+        windows += [
+            (
+                f"{account}:{workload}:rpd:{day}",
+                1,
+                max(1, int(cap(limits[1]) * workload_share)),
+                day_ttl,
+            ),
+            (
+                f"{account}:{workload}:tpd:{day}",
+                total,
+                max(1, int(cap(limits[3]) * workload_share)),
+                day_ttl,
+            ),
+        ]
+        if q.daily_neurons is not None:
+            assert q.neurons_per_million_input is not None
+            assert q.neurons_per_million_output is not None
+            neurons = math.ceil(
+                input_tokens * q.neurons_per_million_input / 1_000_000
+                + output_tokens * q.neurons_per_million_output / 1_000_000
+            )
+            windows.append((f"{account}:neurons:{day}", neurons, cap(q.daily_neurons), day_ttl))
+        keys = [x[0] for x in windows]
+        args = [v for _, cost, limit, ttl in windows for v in (cost, limit, ttl)]
+        try:
+            blocked = int(self.client.eval(_RESERVE, len(keys), *keys, *args))
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+        # The service can restart or lose AOF guarantees between the first
+        # check and EVAL. Never dispatch an upstream call from that interval.
+        self._require_healthy()
+        if blocked:
+            return Reservation((), (), windows[blocked - 1][3])
+        return Reservation(tuple(keys), tuple(x[1] for x in windows))
+
+    def reconcile(
+        self,
+        reservation: Reservation,
+        estimated_input: int,
+        estimated_output: int,
+        actual_input: int,
+        actual_output: int,
+    ) -> None:
+        if not reservation.keys:
+            return
+        estimated = estimated_input + estimated_output
+        actual = max(0, actual_input) + max(0, actual_output)
+        delta = actual - estimated
+        adjustments = [0] * len(reservation.keys)
+        for i, key in enumerate(reservation.keys):
+            if any(f":{window}:" in key for window in ("tpm", "tph", "tpd")):
+                adjustments[i] = delta
+        if any(adjustments):
+            try:
+                self.client.eval(_ADJUST, len(reservation.keys), *reservation.keys, *adjustments)
+            except redis.RedisError:
+                # Keep the larger reservation if Redis is unavailable.
+                pass
+
+    def refund_unsent(self, reservation: Reservation) -> None:
+        """Undo a reservation only when the provider confirmed no request was sent."""
+        if not reservation.keys:
+            return
+        self._require_healthy()
+        try:
+            self.client.eval(
+                _ADJUST,
+                len(reservation.keys),
+                *reservation.keys,
+                *(-cost for cost in reservation.costs),
+            )
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+        self._require_healthy()
+
+    def remaining_daily_requests(
+        self,
+        spec: ModelSpec,
+        *,
+        provider_rpd: int | None = None,
+        provider_tpd: int | None = None,
+        provider_rph: int | None = None,
+        provider_tph: int | None = None,
+        workload: str | None = None,
+        workload_share: float | None = None,
+        request_tokens: int | None = None,
+        now: datetime | None = None,
+    ) -> int:
+        self._require_healthy()
+        # A measured planning envelope can be smaller than the advertised
+        # context window. Every real request still reserves its actual input
+        # estimate and requested maximum output atomically in Redis.
+        if request_tokens is None:
+            request_tokens = spec.context_tokens
+        if type(request_tokens) is not int or not 0 < request_tokens <= spec.context_tokens:
+            raise ValueError("invalid_request_token_budget")
+        now = now or datetime.now(UTC)
+        day, day_ttl = _day_window(now, spec.quota.reset_tz)
+        hour, hour_ttl = _hour_window(now)
+        try:
+            used = int(self.client.get(f"fr:v1:{spec.provider}:rpd:{day}") or 0)
+            model_used = int(self.client.get(f"fr:v1:{spec.provider}:{spec.model}:rpd:{day}") or 0)
+            tokens_used = int(self.client.get(f"fr:v1:{spec.provider}:tpd:{day}") or 0)
+            model_tokens_used = int(
+                self.client.get(f"fr:v1:{spec.provider}:{spec.model}:tpd:{day}") or 0
+            )
+            neuron_used = (
+                int(self.client.get(f"fr:v1:{spec.provider}:neurons:{day}") or 0)
+                if spec.quota.daily_neurons is not None
+                else 0
+            )
+            workload_used = (
+                int(self.client.get(f"fr:v1:{spec.provider}:{workload}:rpd:{day}") or 0)
+                if workload
+                else 0
+            )
+            workload_tokens_used = (
+                int(self.client.get(f"fr:v1:{spec.provider}:{workload}:tpd:{day}") or 0)
+                if workload
+                else 0
+            )
+            if spec.quota.rph is not None:
+                hour_requests_used = int(self.client.get(f"fr:v1:{spec.provider}:rph:{hour}") or 0)
+                model_hour_requests_used = int(
+                    self.client.get(f"fr:v1:{spec.provider}:{spec.model}:rph:{hour}") or 0
+                )
+                hour_tokens_used = int(self.client.get(f"fr:v1:{spec.provider}:tph:{hour}") or 0)
+                model_hour_tokens_used = int(
+                    self.client.get(f"fr:v1:{spec.provider}:{spec.model}:tph:{hour}") or 0
+                )
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+        ceiling = min(spec.quota.rpd, provider_rpd or spec.quota.rpd)
+        remaining = min(int(ceiling * 0.9) - used, int(spec.quota.rpd * 0.9) - model_used)
+        remaining = min(
+            remaining,
+            max(0, int((provider_tpd or spec.quota.tpd) * 0.9) - tokens_used) // request_tokens,
+            max(0, int(spec.quota.tpd * 0.9) - model_tokens_used) // request_tokens,
+        )
+        if spec.quota.rph is not None and spec.quota.tph is not None:
+            future_hours = max(0, math.ceil((day_ttl - hour_ttl) / 3600))
+            account_rph = provider_rph or spec.quota.rph
+            account_tph = provider_tph or spec.quota.tph
+
+            def hourly_cap(value: int) -> int:
+                return max(1, int(value * 0.9))
+
+            remaining = min(
+                remaining,
+                max(0, hourly_cap(account_rph) - hour_requests_used)
+                + future_hours * hourly_cap(account_rph),
+                max(0, hourly_cap(spec.quota.rph) - model_hour_requests_used)
+                + future_hours * hourly_cap(spec.quota.rph),
+                (
+                    max(0, hourly_cap(account_tph) - hour_tokens_used)
+                    + future_hours * hourly_cap(account_tph)
+                )
+                // request_tokens,
+                (
+                    max(0, hourly_cap(spec.quota.tph) - model_hour_tokens_used)
+                    + future_hours * hourly_cap(spec.quota.tph)
+                )
+                // request_tokens,
+            )
+        if spec.quota.daily_neurons is not None:
+            # Worst-case cost for a request filling the verified context window.
+            # This keeps the free Neuron budget in the readiness calculation.
+            assert spec.quota.neurons_per_million_input is not None
+            assert spec.quota.neurons_per_million_output is not None
+            neuron_cost = max(
+                1,
+                math.ceil(
+                    request_tokens
+                    * max(
+                        spec.quota.neurons_per_million_input,
+                        spec.quota.neurons_per_million_output,
+                    )
+                    / 1_000_000
+                ),
+            )
+            remaining = min(
+                remaining,
+                max(0, int(spec.quota.daily_neurons * 0.9) - neuron_used) // neuron_cost,
+            )
+        if workload:
+            if workload_share is None:
+                workload_share = 0.5 if workload == "cactus-brief" else 0.25
+            if not 0 < workload_share <= 1:
+                raise ValueError("invalid_workload_share")
+            remaining = min(
+                remaining,
+                int(int((provider_rpd or spec.quota.rpd) * 0.9) * workload_share) - workload_used,
+                max(
+                    0,
+                    int(int((provider_tpd or spec.quota.tpd) * 0.9) * workload_share)
+                    - workload_tokens_used,
+                )
+                // request_tokens,
+            )
+        return max(0, remaining)
+
+    def remaining_hourly_requests(
+        self,
+        spec: ModelSpec,
+        *,
+        provider_rph: int | None = None,
+        provider_tph: int | None = None,
+        request_tokens: int | None = None,
+        now: datetime | None = None,
+    ) -> int:
+        """Check whether a model can serve another request in this hour."""
+        self._require_healthy()
+        q = spec.quota
+        if q.rph is None or q.tph is None:
+            return q.rpd
+        if request_tokens is None:
+            request_tokens = spec.context_tokens
+        if type(request_tokens) is not int or not 0 < request_tokens <= spec.context_tokens:
+            raise ValueError("invalid_request_token_budget")
+        hour, _ = _hour_window(now or datetime.now(UTC))
+        account = f"fr:v1:{spec.provider}"
+        model = f"{account}:{spec.model}"
+        try:
+            used = [
+                int(self.client.get(key) or 0)
+                for key in (
+                    f"{account}:rph:{hour}",
+                    f"{account}:tph:{hour}",
+                    f"{model}:rph:{hour}",
+                    f"{model}:tph:{hour}",
+                )
+            ]
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+        return max(
+            0,
+            min(
+                max(1, int((provider_rph or q.rph) * 0.9)) - used[0],
+                (max(1, int((provider_tph or q.tph) * 0.9)) - used[1]) // request_tokens,
+                max(1, int(q.rph * 0.9)) - used[2],
+                (max(1, int(q.tph * 0.9)) - used[3]) // request_tokens,
+            ),
+        )
+
+    def seconds_until_hourly_reset(self, *, now: datetime | None = None) -> int:
+        return _hour_window(now or datetime.now(UTC))[1]
+
+    def cooldown_remaining(self, spec: ModelSpec) -> int:
+        self._require_healthy()
+        try:
+            return max(
+                0,
+                self.client.ttl(f"fr:v1:cooldown:{spec.id}"),
+                self.client.ttl(f"fr:v1:cooldown:provider:{spec.provider}"),
+            )
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
+
+    def seconds_until_daily_reset(self, spec: ModelSpec, *, now: datetime | None = None) -> int:
+        _, seconds = _day_window(now or datetime.now(UTC), spec.quota.reset_tz)
+        return seconds
+
+    def cool_down(
+        self,
+        spec: ModelSpec,
+        seconds: int,
+        *,
+        permanent: bool = False,
+        account_wide: bool = False,
+    ) -> None:
+        self._require_healthy()
+        # Permanent upstream access failure requires a fresh verification record.
+        ttl = 7 * 86400 if permanent else max(1, seconds)
+        try:
+            with self.client.pipeline(transaction=True) as transaction:
+                transaction.setex(
+                    f"fr:v1:cooldown:{spec.id}", ttl, "revoked" if permanent else "cooldown"
+                )
+                if account_wide:
+                    transaction.setex(f"fr:v1:cooldown:provider:{spec.provider}", ttl, "cooldown")
+                transaction.execute()
+        except redis.RedisError as exc:
+            raise RuntimeError("quota_store_unavailable") from exc
