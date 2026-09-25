@@ -15,7 +15,7 @@ import os
 import sys
 import tempfile
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -66,8 +66,12 @@ def _write_report(path: Path, report: dict) -> None:
 
 
 @contextmanager
-def _simplellm_account_lock():
-    path = Path.home() / ".hermes/project-env/HerMaatOS/work/hermes-quota-max-router/.eval.lock"
+def _provider_eval_lock(provider: str):
+    path = (
+        Path.home()
+        / ".hermes/project-env/HerMaatOS/work/hermes-quota-max-router"
+        / f".{provider}-eval.lock"
+    )
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
@@ -247,8 +251,10 @@ def main() -> int:
         else cases
     )
     timeout = httpx.Timeout(120, connect=10)
-    account_lock = _simplellm_account_lock() if args.provider == "simplellm" else nullcontext()
-    with account_lock, httpx.Client(timeout=timeout, trust_env=False) as client:
+    with (
+        _provider_eval_lock(args.provider),
+        httpx.Client(timeout=timeout, trust_env=False) as client,
+    ):
         for case in max_cases:
             if case["id"] in done:
                 continue

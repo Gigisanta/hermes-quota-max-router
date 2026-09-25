@@ -34,7 +34,8 @@ rechaza reutilizar un reporte sin `--resume`. Esta opción vuelve a intentar los
 casos con error y sustituye su fila anterior. Para investigar una respuesta
 incompleta, `--case-id <ID>` selecciona únicamente ese caso y permite
 `--max-tokens 1024` en otro reporte. SimpleLLM consulta su cuota vigente antes
-de cada petición y usa un lock local por cuenta entre evaluaciones. Otras
+de cada petición. Ambos proveedores usan un lock local por cuenta entre
+evaluaciones del mismo Mac. Otras
 aplicaciones de la misma cuenta podrían consumir cuota entre la consulta y la
 petición; esta comparación se ejecuta sin tráfico productivo concurrente. Sus
 resultados son sólo un filtro
