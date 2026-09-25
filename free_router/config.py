@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -56,6 +58,60 @@ NON_PERMANENT_OR_PAID_MODELS = {
     ("cloudflare", "@cf/deepseek-ai/deepseek-v4-pro-0813"),
 }
 MAX_EVIDENCE_AGE = timedelta(days=7)
+MAX_QUALITY_AGE = timedelta(days=30)
+MIN_QUALITY_CASES = {"journal": 60, "simon-news": 50, "cactus-brief": 10}
+_SUITE_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _quality_evaluations(
+    raw: object,
+    workloads: tuple[str, ...],
+    stages: tuple[str, ...],
+    now: datetime,
+) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, str]]]:
+    """Compute conservative scores from comparable, dated editorial case results."""
+    if not isinstance(raw, dict) or set(raw) != set(workloads):
+        raise ValueError("missing_quality_evaluations")
+    scores: dict[str, dict[str, int]] = {}
+    suites: dict[str, dict[str, str]] = {}
+    for workload in workloads:
+        records = raw[workload]
+        if not isinstance(records, dict) or set(records) != set(stages):
+            raise ValueError("missing_quality_evaluations")
+        scores[workload] = {}
+        suites[workload] = {}
+        for stage in stages:
+            row = records[stage]
+            if not isinstance(row, dict):
+                raise ValueError("invalid_quality_evaluation")
+            passed, total = row.get("passed"), row.get("total")
+            suite = row.get("suite_sha256")
+            if (
+                type(passed) is not int
+                or type(total) is not int
+                or total < MIN_QUALITY_CASES[workload]
+                or total > 10_000
+                or not 0 < passed <= total
+                or not isinstance(suite, str)
+                or not _SUITE_SHA256.fullmatch(suite)
+            ):
+                raise ValueError("invalid_quality_evaluation")
+            try:
+                checked_at = datetime.fromisoformat(row["evaluated_at"].replace("Z", "+00:00"))
+            except (KeyError, AttributeError, ValueError) as exc:
+                raise ValueError("invalid_quality_evaluation") from exc
+            if checked_at.tzinfo is None or checked_at > now or now - checked_at > MAX_QUALITY_AGE:
+                raise ValueError("stale_quality_evaluation")
+            # Wilson 95% lower bound prevents a 1/1 smoke from outranking a
+            # thorough 59/60 editorial evaluation.
+            p = passed / total
+            z2 = 1.96**2
+            lower = (
+                p + z2 / (2 * total) - 1.96 * math.sqrt(p * (1 - p) / total + z2 / (4 * total**2))
+            ) / (1 + z2 / total)
+            scores[workload][stage] = round(1000 * max(0.0, lower))
+            suites[workload][stage] = suite
+    return scores, suites
 
 
 @dataclass(frozen=True)
@@ -105,6 +161,8 @@ class ModelSpec:
     api_style: str
     api_key_env: str
     standby: bool
+    quality_scores: dict[str, dict[str, int]]
+    quality_suites: dict[str, dict[str, str]]
 
     @property
     def id(self) -> str:
@@ -156,6 +214,9 @@ class ModelSpec:
             raise ValueError("invalid_workloads")
         if not stages or not set(stages).issubset(STAGES):
             raise ValueError("invalid_stages")
+        quality_scores, quality_suites = _quality_evaluations(
+            raw.get("quality_evaluations"), workloads, stages, now
+        )
         context = raw.get("context_tokens")
         if type(context) is not int or context < 1024:
             raise ValueError("unverified_context")
@@ -206,6 +267,8 @@ class ModelSpec:
             style,
             key_env,
             raw.get("standby") is True,
+            quality_scores,
+            quality_suites,
         )
 
 
@@ -243,6 +306,35 @@ def load_models(
             if model.provider in inconsistent:
                 rejected[model.id] = "inconsistent_account_reset_timezone"
         models = [model for model in models if model.provider not in inconsistent]
+    suites: dict[tuple[str, str], dict[str, set[str]]] = {}
+    for model in models:
+        for workload in model.workloads:
+            for stage in model.stages:
+                suites.setdefault((workload, stage), {}).setdefault(model.provider, set()).add(
+                    model.quality_suites[workload][stage]
+                )
+    canonical: dict[tuple[str, str], str | None] = {}
+    for pair, providers in suites.items():
+        votes: dict[str, int] = {}
+        for provider_suites in providers.values():
+            if len(provider_suites) == 1:
+                suite = next(iter(provider_suites))
+                votes[suite] = votes.get(suite, 0) + 1
+        if not votes:
+            canonical[pair] = None
+            continue
+        top = max(votes.values())
+        winners = [suite for suite, count in votes.items() if count == top]
+        canonical[pair] = winners[0] if len(winners) == 1 else None
+    for model in models:
+        if any(
+            len(suites[(workload, stage)][model.provider]) != 1
+            or model.quality_suites[workload][stage] != canonical[(workload, stage)]
+            for workload in model.workloads
+            for stage in model.stages
+        ):
+            rejected[model.id] = "incomparable_quality_suite"
+    models = [model for model in models if model.id not in rejected]
     return models, rejected
 
 

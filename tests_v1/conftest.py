@@ -55,6 +55,18 @@ def catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 "zero_price": True,
                 "smoke_passed": True,
                 "quality_passed": True,
+                "quality_evaluations": {
+                    workload: {
+                        stage: {
+                            "passed": 60,
+                            "total": 60,
+                            "suite_sha256": "a" * 64,
+                            "evaluated_at": now,
+                        }
+                        for stage in ("author", "reviewer")
+                    }
+                    for workload in ("journal", "simon-news", "cactus-brief")
+                },
                 "standby": provider == "siliconflow",
             }
         )

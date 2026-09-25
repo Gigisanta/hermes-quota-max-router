@@ -188,8 +188,23 @@ def build_app(
         while True:
             try:
                 router.reload()
-                await audit_all(router.models, quota, router.provider)
-                for workload, reserve in router.status()["workloads"].items():
+                audit = await audit_all(router.models, quota, router.provider)
+                status = router.status()
+                watchlist_error = status["candidate_watchlist_error"]
+                if watchlist_error:
+                    _LOG.warning("free_router_candidate_watchlist_error reason=%s", watchlist_error)
+                directory_status = (
+                    audit["catalog"].get("sources", {}).get("free_llm_directory", {}).get("status")
+                )
+                if directory_status != "ok":
+                    _LOG.warning("free_router_directory_unavailable status=%s", directory_status)
+                new_entries = len(audit["catalog"].get("new_directory_entries", []))
+                if new_entries:
+                    _LOG.warning("free_router_new_candidate_leads count=%s", new_entries)
+                due = [row["id"] for row in status["candidate_backlog"] if row["review_due"]]
+                if due:
+                    _LOG.warning("free_router_candidate_review_due providers=%s", ",".join(due))
+                for workload, reserve in status["workloads"].items():
                     if not reserve["ready"]:
                         _LOG.warning(
                             "free_router_reserve_deficit workload=%s providers=%s reasons=%s",

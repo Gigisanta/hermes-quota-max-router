@@ -239,7 +239,13 @@ async def test_catalog_never_queries_disallowed_aggregator(quota: QuotaStore, tm
         return httpx.Response(200, text=directory)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        report = await audit_catalog([], quota, client=client, output=tmp_path / "audit.json")
+        report = await audit_catalog(
+            [],
+            quota,
+            client=client,
+            output=tmp_path / "audit.json",
+            watchlist=tmp_path / "missing-watchlist.json",
+        )
 
     assert seen == [FREE_LLM_DIRECTORY]
     assert report["candidates"] == []
@@ -249,6 +255,66 @@ async def test_catalog_never_queries_disallowed_aggregator(quota: QuotaStore, tm
     ]
     assert report["sources"]["free_llm_directory"]["reference_only"] is True
     assert report["sources"]["free_llm_directory"]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_candidate_backlog_survives_directory_outage_and_never_admits(
+    quota: QuotaStore, tmp_path: Path
+):
+    watchlist = tmp_path / "watchlist.json"
+    watchlist.write_text(
+        json.dumps(
+            {
+                "providers": [
+                    {
+                        "id": "candidate",
+                        "operator": "Candidate",
+                        "state": "onboarding",
+                        "checked_at": "2026-09-01T00:00:00Z",
+                        "next_step": "Check official terms and account",
+                        "official_urls": ["https://example.com/pricing"],
+                    },
+                    {
+                        "id": "excluded",
+                        "operator": "Excluded",
+                        "state": "excluded",
+                        "checked_at": "2026-09-01T00:00:00Z",
+                        "next_step": "Do not use",
+                        "official_urls": ["https://example.com/terms"],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    directory = """<!--TABLE:QUICKREF:START-->
+| [First](https://example.com/first) | api |
+| [Excluded](https://example.com/excluded) | api |
+<!--TABLE:QUICKREF:END-->"""
+    output = tmp_path / "discovery.json"
+
+    async def run(status: int, body: str) -> dict:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(status, text=body))
+        ) as client:
+            return await audit_catalog([], quota, client=client, output=output, watchlist=watchlist)
+
+    first = await run(200, directory)
+    assert [row["name"] for row in first["new_directory_entries"]] == ["First"]
+    assert [row["id"] for row in first["candidates"]] == ["candidate"]
+    assert first["candidates"][0]["review_due"] is True
+    assert first["demoted"] == []
+    outage = await run(503, "")
+    assert outage["seen_directory_names"] == ["Excluded", "First"]
+    recovered = await run(
+        200,
+        directory.replace(
+            "<!--TABLE:QUICKREF:END-->",
+            "| [Second](https://example.com/second) | api |\n<!--TABLE:QUICKREF:END-->",
+        ),
+    )
+    assert [row["name"] for row in recovered["new_directory_entries"]] == ["Second"]
+    assert recovered["candidates"] == first["candidates"]
 
 
 @pytest.mark.asyncio

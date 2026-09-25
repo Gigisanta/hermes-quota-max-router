@@ -10,6 +10,8 @@ El router y los tres adaptadores arrancan desactivados. Este piloto dura **siete
    La herramienta de [medición basal](../scripts/measure_peak_baseline.md) consulta los SQLite actuales en modo lectura y muestra los eventos observados. Journal registra intentos en best effort, Simón anota algunos intentos después de generar y Cactus mantiene una auditoría semanal; por eso esos contadores históricos son límites inferiores y la herramienta no emite `daily-peak.json` ni los trata como siete días completos de demanda.
 3. Ejecutá `quotamax audit` y conservá sus reportes `var/discovery.json` y `var/access-audit.json`. El smoke diario prueba acceso y una afirmación mínima; no acredita calidad general ni facturación. Revisá precio y cuotas en las consolas oficiales cada día y renová las atestaciones sólo con evidencia real.
 
+   Para preparar una reserva nueva, revisá `config/provider-watchlist.json` y `candidates`/`new_directory_entries` en `var/discovery.json`. Priorizá operadores independientes con alta y uso editorial permitidos. Confirmá en fuentes oficiales y en la cuenta tarifa cero, límites, ausencia de facturación y modelo exacto; probá acceso con una petición pública mínima y completá los casos editoriales. Sólo entonces agregá el modelo a `var/verified-models.json`. Las entradas del directorio y la lista de candidatos no se promueven automáticamente. El router recarga las atestaciones admitidas en cada intento, sin reinicio, y retira al vencerlas. Actualizá la lista curada tras cada investigación para que el próximo déficit muestre un paso concreto.
+
 ## Casos y medidas
 
 | Carga | Muestra sin publicación | Control editorial |
@@ -17,6 +19,8 @@ El router y los tres adaptadores arrancan desactivados. Este piloto dura **siete
 | Journal | Los 60 casos de `bin/newsblog/frozen_cases.json` del repo HerMaatOS, más corridas de autor sobre fuentes públicas | Citas exactas, esquema, grounding y decisión del revisor frente a `expected_approved`; ningún error nuevo |
 | Simón | 50 temas reales distintos de la cola de ciencia, sin selección favorable | Evidencia y revisión clínica humana; cero errores graves, afirmaciones sustentadas y comparación a ciegas conforme al gate de Simón |
 | Cactus | Briefs históricos con fixtures de mercado y cotizaciones vigentes de prueba | Cifras, procedencia y vigencia; ninguna omisión de historias/temas por el revisor; fallback determinista sólo tras su QA |
+
+Las evaluaciones de cada modelo usan el mismo conjunto por carga y etapa; registrá su SHA-256, aprobados/totales y fecha en `quality_evaluations`. El router compara modelos con un límite inferior conservador de calidad y deja la reserva detrás de los activos. Para Cactus se exige al menos 10 briefs de calibración, además de sus controles de cifras, procedencia y vigencia. Estos campos no sustituyen la revisión humana ni el período de siete días.
 
 Para la comparación sintética del revisor de Journal, cargá la clave verificada
 en el entorno del proceso y ejecutá, desde este repo:

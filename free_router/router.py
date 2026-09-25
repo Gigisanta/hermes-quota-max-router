@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from free_router.config import WORKLOADS, ModelSpec, load_models
+from free_router.discovery import candidate_backlog
 from free_router.provider import ProviderClient, ProviderFailure
 from free_router.quota import QuotaStore
 
@@ -261,7 +262,11 @@ class EditorialRouter:
             "providers": len(providers),
             "active": len(active),
             "standby": len(standby),
+            "missing_independent_providers": max(0, 4 - len(providers)),
+            "missing_active_providers": max(0, 3 - len(active)),
+            "missing_standby_providers": 0 if standby - active else 1,
             "verified_daily_requests": capacity,
+            "daily_request_shortfall": max(0, 2 * peak - capacity) if peak else None,
             "measured_peak_requests": peak,
             "planned_tokens_per_request": planned_tokens,
             "busy_provider_slot": slot_blocked,
@@ -342,10 +347,22 @@ class EditorialRouter:
                     provider_tph=limits[5],
                     request_tokens=input_tokens + max_tokens,
                 )
-                ranked.append((m.standby, -remaining / max(1, m.quota.rpd), m.provider, m))
+                if remaining <= 0:
+                    waits.append(self.quota.seconds_until_daily_reset(m))
+                    continue
+                ranked.append(
+                    (
+                        m.standby,
+                        -m.quality_scores[workload][stage],
+                        -remaining / max(1, m.quota.rpd),
+                        m.provider,
+                        m.model,
+                        m,
+                    )
+                )
         except RuntimeError:
             return Attempt(None, 60, "quota_store_unavailable")
-        for _, _, _, spec in sorted(ranked, key=lambda x: x[:3]):
+        for _, _, _, _, _, spec in sorted(ranked, key=lambda x: x[:5]):
             try:
                 reservation = self.quota.reserve(
                     spec,
@@ -428,17 +445,46 @@ class EditorialRouter:
 
     def status(self) -> dict:
         self.reload()
+        candidates, watchlist_error = candidate_backlog()
         try:
             activated = {w: self.quota.production_activated(w) for w in WORKLOADS}
         except RuntimeError:
             activated = {w: False for w in WORKLOADS}
         return {
             "workloads": {w: self.readiness(w) for w in ("journal", "simon-news", "cactus-brief")},
+            "routing_order": {
+                workload: {
+                    stage: [
+                        {
+                            "id": model.id,
+                            "quality_lower_bound": model.quality_scores[workload][stage],
+                            "standby": model.standby,
+                        }
+                        for model in sorted(
+                            (
+                                m
+                                for m in self.models
+                                if workload in m.workloads and stage in m.stages
+                            ),
+                            key=lambda m: (
+                                m.standby,
+                                -m.quality_scores[workload][stage],
+                                m.provider,
+                                m.model,
+                            ),
+                        )
+                    ]
+                    for stage in ("author", "reviewer")
+                }
+                for workload in WORKLOADS
+            },
             "production": {
                 w: {"adopted": w in self.production_workloads, "activated": activated[w]}
                 for w in WORKLOADS
             },
             "verified_models": len(self.models),
+            "candidate_backlog": candidates,
+            "candidate_watchlist_error": watchlist_error,
             "rejected": self.rejected,
             "checked_at": datetime.now(UTC).isoformat(),
         }

@@ -8,6 +8,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -28,6 +29,8 @@ ACCESS_AUDIT_OUTPUT_TOKENS = 48
 # the same prompt completed with a 512-token cap on the verified free model.
 SIMPLELLM_ACCESS_AUDIT_OUTPUT_TOKENS = 512
 ACCESS_AUDIT_COOLDOWN_SECONDS = 24 * 60 * 60
+WATCHLIST = Path(__file__).resolve().parents[1] / "config/provider-watchlist.json"
+WATCHLIST_REVIEW_DAYS = 7
 
 
 def _atomic_json(path: Path, payload: dict) -> None:
@@ -89,29 +92,132 @@ def _directory_entries(readme: str) -> list[dict[str, str]]:
     ]
 
 
+def _official_https_url(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = urlparse(value)
+        return parsed.scheme == "https" and bool(parsed.hostname)
+    except ValueError:
+        return False
+
+
+def candidate_backlog(
+    path: Path = WATCHLIST,
+    *,
+    now: datetime | None = None,
+    include_excluded: bool = False,
+) -> tuple[list[dict], str | None]:
+    """Read curated leads; they never change model admission."""
+    now = now or datetime.now(UTC)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [], "watchlist_unavailable"
+    if not isinstance(raw, dict) or not isinstance(raw.get("providers"), list):
+        return [], "invalid_watchlist_schema"
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for item in raw["providers"]:
+        if not isinstance(item, dict):
+            return [], "invalid_watchlist_schema"
+        provider_id, state, operator = (
+            item.get("id"),
+            item.get("state"),
+            item.get("operator"),
+        )
+        next_step, urls, checked = (
+            item.get("next_step"),
+            item.get("official_urls"),
+            item.get("checked_at"),
+        )
+        if (
+            not isinstance(provider_id, str)
+            or not re.fullmatch(r"[a-z][a-z0-9-]{1,39}", provider_id)
+            or provider_id in seen
+            or not isinstance(state, str)
+            or state not in {"research", "onboarding", "editorial_pending", "excluded"}
+            or not isinstance(operator, str)
+            or not operator.strip()
+            or not isinstance(next_step, str)
+            or not next_step.strip()
+            or not isinstance(urls, list)
+            or not urls
+            or any(not _official_https_url(url) for url in urls)
+            or not isinstance(checked, str)
+        ):
+            return [], "invalid_watchlist_schema"
+        try:
+            checked_at = datetime.fromisoformat(checked.replace("Z", "+00:00"))
+        except ValueError:
+            return [], "invalid_watchlist_schema"
+        if checked_at.tzinfo is None or checked_at > now:
+            return [], "invalid_watchlist_schema"
+        seen.add(provider_id)
+        if state != "excluded" or include_excluded:
+            rows.append(
+                {
+                    "id": provider_id,
+                    "operator": operator,
+                    "state": state,
+                    "next_step": next_step,
+                    "official_urls": urls,
+                    "checked_at": checked,
+                    "review_due": (now - checked_at).days >= WATCHLIST_REVIEW_DAYS,
+                }
+            )
+    order = {"editorial_pending": 0, "onboarding": 1, "research": 2, "excluded": 3}
+    rows.sort(key=lambda row: (order[row["state"]], row["id"]))
+    return rows, None
+
+
 async def audit_catalog(
     models: list[ModelSpec],
     quota: QuotaStore,
     *,
     client: httpx.AsyncClient | None = None,
     output: Path = Path("var/discovery.json"),
+    watchlist: Path = WATCHLIST,
 ) -> dict:
     # Keep the historical arguments for callers; the directory is reference-only.
     own_client = client is None
     client = client or httpx.AsyncClient(timeout=15)
+    now = datetime.now(UTC)
+    watchlist_rows, watchlist_error = candidate_backlog(watchlist, now=now, include_excluded=True)
+    candidates = [row for row in watchlist_rows if row["state"] != "excluded"]
     result: dict = {
-        "checked_at": datetime.now(UTC).isoformat(),
+        "checked_at": now.isoformat(),
         "sources": {},
         "directory_entries": [],
-        "candidates": [],
+        "new_directory_entries": [],
+        "candidates": candidates,
         "demoted": [],
     }
+    result["sources"]["operator_watchlist"] = {
+        "status": watchlist_error or "ok",
+        "reference_only": True,
+    }
+    try:
+        previous = json.loads(output.read_text(encoding="utf-8"))
+        known = set(previous.get("seen_directory_names", []))
+        known = {name for name in known if isinstance(name, str)}
+    except (OSError, ValueError, TypeError, AttributeError):
+        known = set()
     try:
         try:
             response = await client.get(FREE_LLM_DIRECTORY)
             if response.status_code == 200:
                 result["directory_entries"] = _directory_entries(response.text[:1_000_000])
             directory_ok = bool(result["directory_entries"])
+            if directory_ok:
+                current = {entry["name"] for entry in result["directory_entries"]}
+                curated = {row["operator"].casefold() for row in watchlist_rows}
+                result["new_directory_entries"] = [
+                    entry
+                    for entry in result["directory_entries"]
+                    if entry["name"] not in known and entry["name"].casefold() not in curated
+                ]
+                known.update(current)
             result["sources"]["free_llm_directory"] = {
                 "status": (
                     "ok"
@@ -130,6 +236,7 @@ async def audit_catalog(
     finally:
         if own_client:
             await client.aclose()
+    result["seen_directory_names"] = sorted(known, key=str.casefold)[:1000]
     _atomic_json(output, result)
     return result
 

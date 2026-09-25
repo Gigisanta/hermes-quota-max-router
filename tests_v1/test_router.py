@@ -133,6 +133,61 @@ def test_real_completion_and_distinct_reviewer(catalog, quota, tmp_path, monkeyp
         assert all("content" not in row for row in metrics["daily_requests"])
 
 
+def test_measured_editorial_quality_precedes_quota_and_keeps_standby_last(
+    catalog, quota, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("ROUTER_TOKEN_JOURNAL", "journal-token")
+    data = json.loads(catalog.read_text())
+    for row in data["models"]:
+        row["quality_evaluations"]["journal"]["author"]["passed"] = {
+            "gemini": 55,
+            "groq": 60,
+            "cloudflare": 58,
+            "siliconflow": 60,
+        }[row["provider"]]
+        row["quality_evaluations"]["journal"]["reviewer"]["passed"] = {
+            "gemini": 60,
+            "groq": 54,
+            "cloudflare": 58,
+            "siliconflow": 60,
+        }[row["provider"]]
+    catalog.write_text(json.dumps(data))
+    with TestClient(_app(catalog, quota, tmp_path)) as client:
+        order = client.get("/v1/router/status").json()["routing_order"]["journal"]
+        assert order["author"][0]["id"] == "groq/test-groq"
+        assert order["reviewer"][0]["id"] == "gemini/test-gemini"
+        assert order["author"][-1]["standby"] is True
+        author = client.post("/v1/chat/completions", json=_body(), headers=_headers())
+        assert author.status_code == 200
+        assert author.json()["router"]["provider"] == "groq"
+        route = author.json()["router"]
+        review = client.post(
+            "/v1/chat/completions",
+            json=_body("Revisá este artículo"),
+            headers=_headers("reviewer", route["provider"], route["job_id"]),
+        )
+        assert review.status_code == 200
+        assert review.json()["router"]["provider"] == "gemini"
+
+
+def test_incomparable_or_tiny_editorial_evaluations_fail_closed(catalog):
+    data = json.loads(catalog.read_text())
+    data["models"][0]["quality_evaluations"]["journal"]["author"]["total"] = 1
+    data["models"][0]["quality_evaluations"]["journal"]["author"]["passed"] = 1
+    catalog.write_text(json.dumps(data))
+    models, rejected = load_models(catalog)
+    assert "gemini/test-gemini" in rejected
+    assert len(models) == 3
+
+    data["models"][0]["quality_evaluations"]["journal"]["author"].update(total=60, passed=60)
+    data["models"][1]["quality_evaluations"]["journal"]["reviewer"]["suite_sha256"] = "b" * 64
+    catalog.write_text(json.dumps(data))
+    models, rejected = load_models(catalog)
+    assert len(models) == 3
+    assert "groq/test-groq" in rejected
+    assert set(rejected.values()) == {"incomparable_quality_suite"}
+
+
 def test_reviewer_rejects_unverified_author_provider_header(catalog, quota, tmp_path, monkeypatch):
     monkeypatch.setenv("ROUTER_TOKEN_JOURNAL", "journal-token")
     fake = FakeProvider()
