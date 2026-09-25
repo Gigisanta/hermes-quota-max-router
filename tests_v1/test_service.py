@@ -58,16 +58,29 @@ def test_service_ignores_ambient_keys_from_other_projects(tmp_path: Path, monkey
     path = tmp_path / ".env"
     _private_file(path, "ROUTER_PILOT_MODE=0\n")
     monkeypatch.setenv("GROQ_API_KEY", "unrelated-project-key")
+    monkeypatch.setenv("SIMPLELLM_API_KEY", "unrelated-simplellm-key")
+    monkeypatch.setenv("VIKASIT_API_KEY", "unrelated-vikasit-key")
     monkeypatch.setattr(sys, "argv", ["service", "--env-file", str(path)])
     captured = {}
 
     def fake_run(*args, **kwargs):
         captured["key"] = os.getenv("GROQ_API_KEY")
+        captured["simplellm"] = os.getenv("SIMPLELLM_API_KEY")
+        captured["vikasit"] = os.getenv("VIKASIT_API_KEY")
         captured["pilot"] = os.getenv("ROUTER_PILOT_MODE")
 
     monkeypatch.setattr(service.uvicorn, "run", fake_run)
     service.main()
-    assert captured == {"key": None, "pilot": "0"}
+    assert captured == {"key": None, "simplellm": None, "vikasit": None, "pilot": "0"}
+
+
+def test_service_loads_only_project_keys_for_new_free_providers(tmp_path: Path) -> None:
+    path = tmp_path / ".env"
+    _private_file(path, "SIMPLELLM_API_KEY=test-simplellm\nVIKASIT_API_KEY=test-vikasit\n")
+    assert load_private_env(path) == {
+        "SIMPLELLM_API_KEY": "test-simplellm",
+        "VIKASIT_API_KEY": "test-vikasit",
+    }
 
 
 def test_install_backfills_state_paths_and_tokens_without_rotating_existing_key(

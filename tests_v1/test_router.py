@@ -363,6 +363,45 @@ def test_openrouter_is_not_an_admitted_provider(catalog):
 
 
 @pytest.mark.asyncio
+async def test_vikasit_only_accepts_nova_within_published_free_allowance(catalog, monkeypatch):
+    raw = json.loads(catalog.read_text())["models"][0]
+    raw.update(
+        provider="vikasit",
+        model="vikasit-3",
+        evidence_url="https://vikasit.ai/inference",
+    )
+    monkeypatch.setenv("VIKASIT_API_KEY", "test-key")
+    with pytest.raises(ValueError, match="model_not_permanently_free"):
+        ModelSpec.parse(raw)
+
+    raw["model"] = "vikasit-nova"
+    raw["quota"]["tpd"] = 2_000_001
+    with pytest.raises(ValueError, match="unverified_free_daily_tokens"):
+        ModelSpec.parse(raw)
+
+    raw["quota"]["tpd"] = 2_000_000
+    spec = ModelSpec.parse(raw)
+    seen = []
+
+    def handler(request):
+        seen.append((str(request.url), json.loads(request.content)["model"]))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "model": spec.model,
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await ProviderClient(client).complete(
+            spec, [{"role": "user", "content": "Texto público"}], 32, 0
+        )
+    assert result["content"] == "ok"
+    assert seen == [("https://api.vikasit.ai/v1/chat/completions", "vikasit-nova")]
+
+
+@pytest.mark.asyncio
 async def test_novita_transport_uses_documented_rest_path_without_admitting_temporary_model(
     catalog, monkeypatch
 ):

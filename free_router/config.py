@@ -33,6 +33,12 @@ PROVIDERS = {
         "SIMPLELLM_API_KEY",
         "simplellm.eu",
     ),
+    "vikasit": (
+        "https://api.vikasit.ai/v1",
+        "openai",
+        "VIKASIT_API_KEY",
+        "vikasit.ai",
+    ),
     "cloudflare": ("", "cloudflare", "CLOUDFLARE_API_TOKEN", "developers.cloudflare.com"),
 }
 NON_PERMANENT_OR_PAID_MODELS = {
@@ -118,6 +124,10 @@ class ModelSpec:
             raise ValueError("invalid_model")
         if (provider, model) in NON_PERMANENT_OR_PAID_MODELS:
             raise ValueError("model_not_permanently_free")
+        # Vikasit sells every other inference model per token. Its published
+        # zero-price allowance applies only to this exact model ID.
+        if provider == "vikasit" and model != "vikasit-nova":
+            raise ValueError("model_not_permanently_free")
         evidence_url = raw.get("evidence_url", "")
         parsed_evidence = urlparse(evidence_url)
         host = parsed_evidence.hostname or ""
@@ -150,6 +160,8 @@ class ModelSpec:
         if type(context) is not int or context < 1024:
             raise ValueError("unverified_context")
         quota = Quota.parse(raw.get("quota", {}))
+        if provider == "vikasit" and quota.tpd > 2_000_000:
+            raise ValueError("unverified_free_daily_tokens")
         if provider == "simplellm" and (quota.rph is None or quota.tph is None):
             raise ValueError("missing_simplellm_hourly_quota")
         try:
