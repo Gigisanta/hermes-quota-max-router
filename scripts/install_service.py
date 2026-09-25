@@ -171,6 +171,7 @@ def _healthy(commit: str) -> bool:
             and payload.get("release") == commit
             and payload.get("service_configured") is True
             and isinstance(reserve, dict)
+            and "candidate_watchlist_error" in reserve
             and reserve.get("candidate_watchlist_error") is None
             and isinstance(reserve.get("candidate_backlog"), list)
         )

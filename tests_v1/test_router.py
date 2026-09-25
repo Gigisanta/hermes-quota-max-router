@@ -187,6 +187,14 @@ def test_incomparable_or_tiny_editorial_evaluations_fail_closed(catalog):
     assert "groq/test-groq" in rejected
     assert set(rejected.values()) == {"incomparable_quality_suite"}
 
+    data["models"][1]["quality_evaluations"]["journal"]["reviewer"].update(
+        suite_sha256="a" * 64, total=120, passed=120
+    )
+    catalog.write_text(json.dumps(data))
+    models, rejected = load_models(catalog)
+    assert len(models) == 3
+    assert rejected["groq/test-groq"] == "incomparable_quality_suite"
+
 
 def test_reviewer_rejects_unverified_author_provider_header(catalog, quota, tmp_path, monkeypatch):
     monkeypatch.setenv("ROUTER_TOKEN_JOURNAL", "journal-token")

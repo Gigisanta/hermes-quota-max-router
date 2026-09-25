@@ -168,6 +168,24 @@ def test_install_health_requires_packaged_watchlist(monkeypatch, watchlist_error
     assert install_service._healthy("expected-release") is (watchlist_error is None)
 
 
+def test_install_health_rejects_missing_watchlist_indicator(monkeypatch) -> None:
+    class Opener:
+        def open(self, url, **_kwargs):
+            if url.endswith("/health"):
+                payload = {
+                    "status": "ok",
+                    "redis": True,
+                    "release": "expected-release",
+                    "service_configured": True,
+                }
+            else:
+                payload = {"candidate_backlog": []}
+            return BytesIO(json.dumps(payload).encode())
+
+    monkeypatch.setattr(install_service, "build_opener", lambda *_args: Opener())
+    assert install_service._healthy("expected-release") is False
+
+
 def test_launchd_points_to_watchlist_in_pinned_release(tmp_path: Path) -> None:
     release = tmp_path / "releases" / "revision"
     plist = plistlib.loads(install_service._plist(release, tmp_path / "logs"))

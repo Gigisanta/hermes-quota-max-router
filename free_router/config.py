@@ -68,12 +68,12 @@ def _quality_evaluations(
     workloads: tuple[str, ...],
     stages: tuple[str, ...],
     now: datetime,
-) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, str]]]:
+) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, tuple[str, int]]]]:
     """Compute conservative scores from comparable, dated editorial case results."""
     if not isinstance(raw, dict) or set(raw) != set(workloads):
         raise ValueError("missing_quality_evaluations")
     scores: dict[str, dict[str, int]] = {}
-    suites: dict[str, dict[str, str]] = {}
+    suites: dict[str, dict[str, tuple[str, int]]] = {}
     for workload in workloads:
         records = raw[workload]
         if not isinstance(records, dict) or set(records) != set(stages):
@@ -110,7 +110,7 @@ def _quality_evaluations(
                 p + z2 / (2 * total) - 1.96 * math.sqrt(p * (1 - p) / total + z2 / (4 * total**2))
             ) / (1 + z2 / total)
             scores[workload][stage] = round(1000 * max(0.0, lower))
-            suites[workload][stage] = suite
+            suites[workload][stage] = (suite, total)
     return scores, suites
 
 
@@ -162,7 +162,7 @@ class ModelSpec:
     api_key_env: str
     standby: bool
     quality_scores: dict[str, dict[str, int]]
-    quality_suites: dict[str, dict[str, str]]
+    quality_suites: dict[str, dict[str, tuple[str, int]]]
 
     @property
     def id(self) -> str:
@@ -306,16 +306,16 @@ def load_models(
             if model.provider in inconsistent:
                 rejected[model.id] = "inconsistent_account_reset_timezone"
         models = [model for model in models if model.provider not in inconsistent]
-    suites: dict[tuple[str, str], dict[str, set[str]]] = {}
+    suites: dict[tuple[str, str], dict[str, set[tuple[str, int]]]] = {}
     for model in models:
         for workload in model.workloads:
             for stage in model.stages:
                 suites.setdefault((workload, stage), {}).setdefault(model.provider, set()).add(
                     model.quality_suites[workload][stage]
                 )
-    canonical: dict[tuple[str, str], str | None] = {}
+    canonical: dict[tuple[str, str], tuple[str, int] | None] = {}
     for pair, providers in suites.items():
-        votes: dict[str, int] = {}
+        votes: dict[tuple[str, int], int] = {}
         for provider_suites in providers.values():
             if len(provider_suites) == 1:
                 suite = next(iter(provider_suites))

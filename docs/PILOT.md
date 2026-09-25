@@ -20,7 +20,7 @@ El router y los tres adaptadores arrancan desactivados. Este piloto dura **siete
 | Simón | 50 temas reales distintos de la cola de ciencia, sin selección favorable | Evidencia y revisión clínica humana; cero errores graves, afirmaciones sustentadas y comparación a ciegas conforme al gate de Simón |
 | Cactus | Briefs históricos con fixtures de mercado y cotizaciones vigentes de prueba | Cifras, procedencia y vigencia; ninguna omisión de historias/temas por el revisor; fallback determinista sólo tras su QA |
 
-Las evaluaciones de cada modelo usan el mismo conjunto por carga y etapa; registrá su SHA-256, aprobados/totales y fecha en `quality_evaluations`. El router compara modelos con un límite inferior conservador de calidad y deja la reserva detrás de los activos. Para Cactus se exige al menos 10 briefs de calibración, además de sus controles de cifras, procedencia y vigencia. Estos campos no sustituyen la revisión humana ni el período de siete días.
+Las evaluaciones de cada modelo usan el mismo conjunto y cantidad de casos por carga y etapa; registrá su SHA-256, aprobados/totales y fecha en `quality_evaluations`. El router compara modelos con un límite inferior conservador de calidad y deja la reserva detrás de los activos. Para Cactus se exige al menos 10 briefs de calibración, además de sus controles de cifras, procedencia y vigencia. Estos campos no sustituyen la revisión humana ni el período de siete días.
 
 Para la comparación sintética del revisor de Journal, cargá la clave verificada
 en el entorno del proceso y ejecutá, desde este repo:
