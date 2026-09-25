@@ -19,10 +19,10 @@
     {
       "id": "groq",
       "operator": "Groq",
-      "state": "onboarding",
+      "state": "editorial_pending",
       "checked_at": "2026-09-25T00:00:00Z",
-      "next_step": "Crear clave dedicada cuando se confirme la acción pendiente; probar API y evaluar autor y revisor por carga.",
-      "official_urls": ["https://console.groq.com/docs/rate-limits", "https://groq.com/pricing"]
+      "next_step": "Completar evaluación editorial de autor y revisor por carga; medir siete días y renovar acceso, plan Free y cuotas de la cuenta.",
+      "official_urls": ["https://console.groq.com/docs/rate-limits", "https://console.groq.com/docs/billing-faqs"]
     },
     {
       "id": "cloudflare",
