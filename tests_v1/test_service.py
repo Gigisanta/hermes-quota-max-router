@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from io import BytesIO
 from pathlib import Path
@@ -128,3 +129,43 @@ def test_install_health_rejects_nonobject_json(monkeypatch) -> None:
 
     monkeypatch.setattr(install_service, "build_opener", lambda *_args: Opener())
     assert install_service._healthy("expected-release") is False
+
+
+def test_failed_upgrade_restores_previous_plist_even_when_stop_wait_times_out(
+    tmp_path: Path, monkeypatch
+) -> None:
+    plist = tmp_path / "LaunchAgents" / "com.hermaat.free-router.plist"
+    plist.parent.mkdir()
+    previous = b"previous-service-definition"
+    plist.write_bytes(previous)
+    monkeypatch.setattr(install_service, "PLIST", plist)
+    monkeypatch.setattr(install_service, "SERVICE_ROOT", tmp_path / "service")
+    monkeypatch.setattr(install_service, "_create_private_env", lambda *_args, **_kw: None)
+    monkeypatch.setattr(
+        install_service,
+        "_install_release",
+        lambda *_args: tmp_path / "releases" / ("a" * 40),
+    )
+    monkeypatch.setattr(install_service, "_port_in_use", lambda: False)
+
+    def fake_run(*args, **_kwargs):
+        if args[:2] == ("git", "rev-parse"):
+            return subprocess.CompletedProcess(args, 0, stdout="a" * 40)
+        if args[:2] == ("git", "status"):
+            return subprocess.CompletedProcess(args, 0, stdout="")
+        raise subprocess.CalledProcessError(1, args)
+
+    monkeypatch.setattr(install_service, "_run", fake_run)
+    monkeypatch.setattr(
+        install_service.subprocess,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0),
+    )
+    monkeypatch.setattr(
+        install_service,
+        "_wait_stopped",
+        lambda _domain: (_ for _ in ()).throw(RuntimeError("stop_timeout")),
+    )
+    with pytest.raises(RuntimeError, match="stop_timeout"):
+        install_service.install()
+    assert plist.read_bytes() == previous

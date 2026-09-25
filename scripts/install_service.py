@@ -232,13 +232,15 @@ def install() -> None:
             raise RuntimeError("service_failed_health_gate")
     except Exception:
         subprocess.run(["launchctl", "bootout", f"{domain}/{LABEL}"], capture_output=True)
-        _wait_stopped(domain)
         if previous is None:
             PLIST.unlink(missing_ok=True)
         else:
             _atomic_private_write(PLIST, previous)
-            if loaded:
-                _run("launchctl", "bootstrap", domain, str(PLIST))
+        # Restore the on-disk service definition even when the new process
+        # cannot release its port yet. Re-bootstrap only after it has stopped.
+        _wait_stopped(domain)
+        if previous is not None and loaded:
+            _run("launchctl", "bootstrap", domain, str(PLIST))
         raise
     print(f"installed {LABEL} release={commit[:12]} on 127.0.0.1:8123")
 
