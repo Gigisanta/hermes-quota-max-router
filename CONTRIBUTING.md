@@ -1,6 +1,6 @@
 # Contribuir
 
-El contrato operativo está en [README.md](README.md). La ruta de inferencia sólo admite modelos con precio cero, cuota de cuenta y evaluación editorial verificadas. Un catálogo público o una respuesta simulada no habilitan un modelo.
+El contrato operativo está en [README.md](README.md) y el [inventario vigente de cuentas, modelos y cuotas](docs/PROVIDER-STATUS.md#cuentas-de-maatwork-ordenadas-por-evidencia-editorial). La ruta de inferencia sólo admite modelos con capacidad gratuita de corte duro, cuota de cuenta y evaluación editorial verificadas. Un catálogo público, una clave guardada o una respuesta simulada no habilitan un modelo.
 
 Preparación local:
 
