@@ -51,10 +51,10 @@
     {
       "id": "finalrouter",
       "operator": "Final Router",
-      "state": "research",
+      "state": "onboarding",
       "checked_at": "2026-09-25T00:00:00Z",
-      "next_step": "Resolver consentimiento pendiente; comprobar operador ascendente, duración del cupo y permiso para uso editorial interno.",
-      "official_urls": ["https://finalrouter.com/free-models", "https://finalrouter.com/terms"]
+      "next_step": "Bloqueo de admisión: un guardrail asignado a la clave permite sólo GPT-5 mini, excluye proveedores que entrenan con prompts y limita gasto a USD 0, pero dos solicitudes sintéticas explícitas a DeepSeek devolvieron 200. Investigar y comprobar que la restricción se aplique realmente antes de enviar borradores editoriales; luego evaluar calidad y capacidad diaria.",
+      "official_urls": ["https://finalrouter.com/free-models", "https://finalrouter.com/pricing", "https://finalrouter.com/api-reference", "https://finalrouter.com/terms"]
     },
     {
       "id": "openrouter",
