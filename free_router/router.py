@@ -97,6 +97,10 @@ class EditorialRouter:
                 cooldown = self.quota.cooldown_remaining(spec)
                 if cooldown:
                     waits.append(cooldown)
+                if spec.provider == "simplellm" and not self.quota.provider_slot_available(
+                    spec.provider
+                ):
+                    waits.append(5)
                 limits = self._provider_cap(spec.provider)
                 if (
                     self.quota.remaining_hourly_requests(
