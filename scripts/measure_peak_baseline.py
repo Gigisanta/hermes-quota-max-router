@@ -21,7 +21,7 @@ SQLITE_READ_ACTIONS = {
     sqlite3.SQLITE_FUNCTION,
     getattr(sqlite3, "SQLITE_RECURSIVE", -1),
 }
-READABLE_TABLES = {"model_runs", "candidate"}
+READABLE_TABLES = {"model_runs", "candidate", "model_attempt"}
 
 
 class EvidenceError(Exception):
@@ -232,7 +232,9 @@ def measure_journal(path: Path, start: date, start_epoch: int, end_epoch: int) -
     }
 
 
-def measure_simon(path: Path, start: date, start_epoch: int, end_epoch: int) -> dict[str, object]:
+def _measure_simon_legacy(
+    path: Path, start: date, start_epoch: int, end_epoch: int
+) -> dict[str, object]:
     daily_counts = {
         (start + timedelta(days=offset)).isoformat(): 0 for offset in range(WINDOW_DAYS)
     }
@@ -320,6 +322,133 @@ def measure_simon(path: Path, start: date, start_epoch: int, end_epoch: int) -> 
             "max_observed_total_tokens_per_request": None,
         },
         "reservation_budget_evidence": "not_recorded",
+    }
+
+
+def measure_simon(path: Path, start: date, start_epoch: int, end_epoch: int) -> dict[str, object]:
+    """Count the durable start ledger, retaining legacy markers as context only."""
+    daily = {
+        (start + timedelta(days=offset)).isoformat(): {
+            "attempts_started": 0,
+            "planned_model_calls": 0,
+            "planned_reviewer_calls": 0,
+            "invalid_output_ceilings": 0,
+        }
+        for offset in range(WINDOW_DAYS)
+    }
+    try:
+        with _open_read_only(path) as connection:
+            try:
+                columns = _table_columns(connection, "model_attempt")
+            except EvidenceError as exc:
+                if exc.reason == "required_table_missing":
+                    return _measure_simon_legacy(path, start, start_epoch, end_epoch)
+                raise
+            required = {"stage", "started_at", "status", "max_output_tokens_requested"}
+            if not required.issubset(columns):
+                raise EvidenceError("model_attempt_schema_not_comparable")
+            bad_timestamps = int(
+                connection.execute(
+                    """SELECT COUNT(*) FROM model_attempt
+                   WHERE typeof(started_at) NOT IN ('integer', 'real')"""
+                ).fetchone()[0]
+            )
+            rows = connection.execute(
+                """SELECT strftime('%Y-%m-%d', started_at, 'unixepoch') AS utc_day,
+                          COUNT(*) AS attempts_started,
+                          SUM(CASE WHEN stage='classify' AND max_output_tokens_requested=200
+                                   THEN 1 WHEN stage='author'
+                                   AND max_output_tokens_requested IN (3500,4500)
+                                   THEN 1 ELSE 0 END)
+                          + SUM(CASE WHEN stage='author' AND max_output_tokens_requested=4500
+                                     THEN 1 ELSE 0 END) AS planned_calls,
+                          SUM(CASE WHEN stage='author' AND max_output_tokens_requested=4500
+                                   THEN 1 ELSE 0 END) AS planned_reviewer_calls,
+                          SUM(CASE WHEN (stage='classify' AND max_output_tokens_requested!=200)
+                                     OR (stage='author' AND max_output_tokens_requested
+                                         NOT IN (0,3500,4500))
+                                     OR stage NOT IN ('classify','author')
+                                   THEN 1 ELSE 0 END) AS invalid_ceilings
+                   FROM model_attempt
+                   WHERE typeof(started_at) IN ('integer', 'real')
+                     AND started_at >= ? AND started_at < ?
+                   GROUP BY utc_day""",
+                (start_epoch, end_epoch),
+            ).fetchall()
+            for row in rows:
+                day = row["utc_day"]
+                if day in daily:
+                    daily[day] = {
+                        "attempts_started": int(row["attempts_started"]),
+                        "planned_model_calls": int(row["planned_calls"] or 0),
+                        "planned_reviewer_calls": int(row["planned_reviewer_calls"] or 0),
+                        "invalid_output_ceilings": int(row["invalid_ceilings"] or 0),
+                    }
+            legacy_markers = int(
+                connection.execute(
+                    """SELECT COUNT(*) FROM candidate
+                   WHERE typeof(attempted_at) IN ('integer', 'real')
+                     AND attempted_at >= ? AND attempted_at < ?""",
+                    (start_epoch, end_epoch),
+                ).fetchone()[0]
+            )
+    except EvidenceError as exc:
+        return {
+            "status": "insufficient_evidence",
+            "reason_codes": [exc.reason],
+            "peak_requests": None,
+            "peak_comparable": False,
+            "daily": daily,
+        }
+    except sqlite3.Error:
+        return {
+            "status": "insufficient_evidence",
+            "reason_codes": ["model_attempt_or_candidate_query_failed"],
+            "peak_requests": None,
+            "peak_comparable": False,
+            "daily": daily,
+        }
+
+    missing_days = [day for day, row in daily.items() if row["attempts_started"] == 0]
+    reasons = ["model_attempt_does_not_prove_scheduler_run_coverage"]
+    if missing_days:
+        reasons.append("one_or_more_utc_days_have_no_started_model_attempt")
+    if bad_timestamps:
+        reasons.append("model_attempt_contains_unbucketable_timestamps")
+    if any(row["invalid_output_ceilings"] for row in daily.values()):
+        reasons.append("model_attempt_contains_unknown_output_ceiling")
+    return {
+        "status": "insufficient_evidence",
+        "reason_codes": reasons,
+        "counter_definition": (
+            "model_attempt starts: classify plans one call at 200 output tokens; "
+            "author plans one call at 3500, plus reviewer at cumulative 4500; "
+            "author with zero ceiling reached no model call. Ceilings are "
+            "recorded before inference and do not prove actual invocation"
+        ),
+        "attempt_semantics": "persisted_before_inference_including_failed_and_interrupted_attempts",
+        "expected_days": WINDOW_DAYS,
+        "observed_event_days": WINDOW_DAYS - len(missing_days),
+        "covered_dates": [day for day in daily if day not in missing_days],
+        "missing_dates": missing_days,
+        "daily": daily,
+        "max_daily_planned_model_calls": max(
+            (row["planned_model_calls"] for row in daily.values()), default=0
+        )
+        or None,
+        "legacy_candidate_completion_markers": legacy_markers,
+        "peak_requests": None,
+        "seven_day_event_coverage": not missing_days,
+        "peak_comparable": False,
+        "invalid_timestamp_rows": bad_timestamps,
+        "total_tokens_telemetry": {
+            "status": "output_ceiling_only_no_actual_tokens",
+            "requests_in_scope": sum(row["planned_model_calls"] for row in daily.values()),
+            "requests_with_total_tokens": 0,
+            "coverage_ratio": 0.0,
+            "max_observed_total_tokens_per_request": None,
+        },
+        "reservation_budget_evidence": "output_ceiling_only_input_message_bytes_missing",
     }
 
 

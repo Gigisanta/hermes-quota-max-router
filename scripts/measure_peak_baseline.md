@@ -15,11 +15,18 @@ payloads editoriales, titulares ni identificadores de filas.
   registrado. El writer actual registra telemetría en best effort, por lo que
   siete días con filas no prueban captura completa de intentos: Journal siempre
   queda `insufficient_evidence`, `peak_comparable=false` y `peak_requests=null`.
-- **Simón:** cuenta filas de `candidate` por `attempted_at`. El writer actual
-  persiste esa marca después de `write_draft`; fallos antes de la actualización
-  quedan fuera. Se informan los días y los conteos observados, pero el contador
-  no puede aprobarse como completo ni como pico válido. El esquema no guarda
-  `total_tokens` por intento.
+- **Simón:** usa el nuevo `model_attempt` persistido antes de cada clasificación
+  o redacción, incluso si la llamada falla o se interrumpe. Una clasificación
+  con techo de 200 tokens indica una llamada prevista; una redacción con techo
+  acumulado de 3500 indica autor y con 4500 indica autor y revisor. Una fila de redacción
+  con techo cero aún no llegó al modelo. `candidate.attempted_at` se informa
+  sólo como marcador histórico y nunca se suma a la cuenta nueva. En bases
+  anteriores sin `model_attempt`, la herramienta vuelve al contador heredado,
+  que omite los fallos previos a `write_draft`. Los techos se escriben antes de
+  invocar el modelo: el cálculo nuevo representa **llamadas planificadas**, no
+  llamadas completadas ni una cota matemática de las llamadas reales. Tampoco
+  demuestra la cobertura diaria del scheduler ni guarda tokens consumidos o
+  bytes de entrada; por eso todavía no produce un pico promocionable.
 - **Cactus:** el generador mantiene un audit por edición semanal en bundles de
   archivos. La herramienta no lee esos archivos ni distribuye una auditoría
   semanal entre siete fechas. No se inspeccionó ninguna base de datos de Cactus;

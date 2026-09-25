@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -12,6 +12,7 @@ from scripts.measure_peak_baseline import (
     _open_read_only,
     build_report,
     main,
+    measure_simon,
     write_daily_peak_if_valid,
 )
 
@@ -238,3 +239,37 @@ def test_cli_reports_lower_bound_and_does_not_write_daily_peak(
     assert not destination.exists()
     assert not destination.parent.exists()
     assert "fixture-only private text" not in captured.out
+
+
+def test_simon_start_ledger_counts_failed_calls_and_reviewer_without_promoting(tmp_path: Path):
+    path = tmp_path / "simon-new.sqlite3"
+    day = date(2026, 9, 24)
+    epoch = int(datetime(2026, 9, 24, tzinfo=UTC).timestamp())
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE candidate (attempted_at REAL)")
+        db.execute("""CREATE TABLE model_attempt (
+            stage TEXT, started_at REAL, status TEXT,
+            max_output_tokens_requested INTEGER)""")
+        db.executemany(
+            "INSERT INTO model_attempt VALUES (?,?,?,?)",
+            [
+                ("classify", epoch + 10, "deferred", 200),
+                ("author", epoch + 20, "approved-local", 4500),
+                ("author", epoch + 30, "deferred", 0),
+            ],
+        )
+        db.execute("INSERT INTO candidate VALUES (?)", (epoch + 20,))
+
+    report = measure_simon(path, day, epoch, epoch + 7 * 86400)
+
+    assert report["daily"]["2026-09-24"] == {
+        "attempts_started": 3,
+        "planned_model_calls": 3,
+        "planned_reviewer_calls": 1,
+        "invalid_output_ceilings": 0,
+    }
+    assert report["legacy_candidate_completion_markers"] == 1
+    assert report["max_daily_planned_model_calls"] == 3
+    assert report["peak_requests"] is None
+    assert report["peak_comparable"] is False
+    assert "model_attempt_does_not_prove_scheduler_run_coverage" in report["reason_codes"]
