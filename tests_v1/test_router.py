@@ -573,6 +573,53 @@ def test_simplellm_hourly_account_quota_is_atomic_and_removes_reserve(catalog, q
 
 
 @pytest.mark.asyncio
+async def test_activation_retries_promptly_when_simplellm_slot_frees_between_checks(
+    catalog, quota, monkeypatch
+):
+    raw = json.loads(catalog.read_text(encoding="utf-8"))
+    standby = raw["models"][-1]
+    standby.update(
+        provider="simplellm",
+        model="gemma-4-E4B",
+        evidence_url="https://simplellm.eu/docs/models.html",
+    )
+    standby["quota"].update(rph=100, tph=100000)
+    catalog.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setenv("SIMPLELLM_API_KEY", "test-key")
+    router = EditorialRouter(
+        quota,
+        FakeProvider(),
+        catalog,
+        {
+            name: {"requests": 2, "tokens_per_request": 1000}
+            for name in ("journal", "simon-news", "cactus-brief")
+        },
+        production_workloads=("journal",),
+    )
+    checks = 0
+
+    def slot_frees(_provider):
+        nonlocal checks
+        checks += 1
+        return checks > 1
+
+    monkeypatch.setattr(quota, "provider_slot_available", slot_frees)
+    outcome = await router.attempt(
+        {
+            "messages": [{"role": "user", "content": "Texto público"}],
+            "max_tokens": 100,
+            "temperature": 0.0,
+        },
+        workload="journal",
+        stage="author",
+    )
+    assert outcome.response is None
+    assert outcome.reason == "reserve_not_ready"
+    assert outcome.retry_after == 5
+    assert checks >= 2
+
+
+@pytest.mark.asyncio
 async def test_unverified_effective_model_or_missing_finish_reason_never_succeeds(
     catalog, monkeypatch
 ):

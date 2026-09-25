@@ -83,7 +83,7 @@ class EditorialRouter:
         other_total = self.daily_peak["journal"] + self.daily_peak["simon-news"]
         return (1 - cactus_share) * self.daily_peak[workload] / other_total
 
-    def _next_window(self, workload: str) -> int:
+    def _next_window(self, workload: str, *, slot_was_busy: bool = False) -> int:
         waits = []
         try:
             for spec in self.models:
@@ -128,37 +128,49 @@ class EditorialRouter:
                     waits.append(self.quota.seconds_until_daily_reset(spec))
         except RuntimeError:
             return 60
-        return max(5, min(waits, default=300))
+        return max(5, min(waits, default=5 if slot_was_busy else 300))
 
     def readiness(self, workload: str) -> dict:
         planned_tokens = self.request_tokens.get(workload)
+        slot_blocked = False
         try:
-            eligible = [
-                m
-                for m in self.models
-                if workload in m.workloads
-                and (planned_tokens is None or planned_tokens <= m.context_tokens)
-                and self.quota.cooldown_remaining(m) == 0
-                and (m.provider != "simplellm" or self.quota.provider_slot_available(m.provider))
-                and self.quota.remaining_hourly_requests(
-                    m,
-                    provider_rph=self._provider_cap(m.provider)[4],
-                    provider_tph=self._provider_cap(m.provider)[5],
-                    request_tokens=planned_tokens,
-                )
-                > 0
-                and self.quota.remaining_daily_requests(
-                    m,
-                    provider_rpd=self._provider_cap(m.provider)[1],
-                    provider_tpd=self._provider_cap(m.provider)[3],
-                    provider_rph=self._provider_cap(m.provider)[4],
-                    provider_tph=self._provider_cap(m.provider)[5],
-                    workload=workload,
-                    workload_share=self._workload_share(workload),
-                    request_tokens=planned_tokens,
-                )
-                > 0
-            ]
+            eligible = []
+            for m in self.models:
+                if workload not in m.workloads or (
+                    planned_tokens is not None and planned_tokens > m.context_tokens
+                ):
+                    continue
+                if self.quota.cooldown_remaining(m):
+                    continue
+                limits = self._provider_cap(m.provider)
+                if (
+                    self.quota.remaining_hourly_requests(
+                        m,
+                        provider_rph=limits[4],
+                        provider_tph=limits[5],
+                        request_tokens=planned_tokens,
+                    )
+                    == 0
+                ):
+                    continue
+                if (
+                    self.quota.remaining_daily_requests(
+                        m,
+                        provider_rpd=limits[1],
+                        provider_tpd=limits[3],
+                        provider_rph=limits[4],
+                        provider_tph=limits[5],
+                        workload=workload,
+                        workload_share=self._workload_share(workload),
+                        request_tokens=planned_tokens,
+                    )
+                    == 0
+                ):
+                    continue
+                if m.provider == "simplellm" and not self.quota.provider_slot_available(m.provider):
+                    slot_blocked = True
+                    continue
+                eligible.append(m)
         except RuntimeError:
             return {
                 "ready": False,
@@ -168,6 +180,7 @@ class EditorialRouter:
                 "verified_daily_requests": 0,
                 "measured_peak_requests": self.daily_peak.get(workload),
                 "planned_tokens_per_request": planned_tokens,
+                "busy_provider_slot": False,
                 "reasons": ["quota_store_unavailable"],
             }
         providers = {
@@ -223,6 +236,7 @@ class EditorialRouter:
                 "standby": 0,
                 "verified_daily_requests": 0,
                 "measured_peak_requests": self.daily_peak.get(workload),
+                "busy_provider_slot": False,
                 "reasons": ["quota_store_unavailable"],
             }
         capacity = sum(remaining.values())
@@ -250,6 +264,7 @@ class EditorialRouter:
             "verified_daily_requests": capacity,
             "measured_peak_requests": peak,
             "planned_tokens_per_request": planned_tokens,
+            "busy_provider_slot": slot_blocked,
             "reasons": reasons,
         }
 
@@ -271,8 +286,13 @@ class EditorialRouter:
             except RuntimeError:
                 return Attempt(None, 60, "quota_store_unavailable")
             if not activated:
-                if not self.readiness(workload)["ready"]:
-                    return Attempt(None, self._next_window(workload), "reserve_not_ready")
+                reserve = self.readiness(workload)
+                if not reserve["ready"]:
+                    return Attempt(
+                        None,
+                        self._next_window(workload, slot_was_busy=reserve["busy_provider_slot"]),
+                        "reserve_not_ready",
+                    )
                 try:
                     self.quota.activate_production(workload)
                 except RuntimeError:
