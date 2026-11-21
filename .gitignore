@@ -13,12 +13,15 @@ dist/
 
 # Virtualenvs
 .venv/
+.venv3*/
 venv/
 env/
 ENV/
 
 # Test / coverage
 .pytest_cache/
+.pytest_cache_*/
+.mypy_cache_*/
 .coverage
 .coverage.*
 htmlcov/

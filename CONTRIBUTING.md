@@ -10,6 +10,8 @@ time.
 
 ---
 
+Verificación: `bin/maat-gate run hermes-quota-max-router --repo <worktree> --sha <sha>` desde `/Users/gigi/maatwork` (preset en `etc/gates.toml` de MaatWork). Un merge exige `bin/maat-gate verify hermes-quota-max-router --sha <sha>` en verde y revisión independiente sobre ese SHA. GitHub Actions no es requisito de merge.
+
 ## Ground rules
 
 - **Be respectful.** Follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
@@ -159,7 +161,7 @@ test: add 8 regression tests for iter 15 hardening
    description.
 4. **Fill the PR template** (`.github/PULL_REQUEST_TEMPLATE.md`).
 5. **Self-review your diff** before requesting review.
-6. **Wait for CI green.** Lint, types, and tests all run automatically.
+6. **Wait for the local gate.** A merge requires `bin/maat-gate verify hermes-quota-max-router --sha <sha>` green (lint, types, tests and secret scan run through `maat-gate run`).
 7. **Address review feedback** in new commits (don't force-push mid-review
    unless asked — it makes review painful).
 
