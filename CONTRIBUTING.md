@@ -10,6 +10,8 @@ time.
 
 ---
 
+Verificación: `bin/maat-gate run hermes-quota-max-router --repo <worktree> --sha <sha>` desde `/Users/gigi/maatwork` (preset en `etc/gates.toml` de MaatWork). Un merge exige `bin/maat-gate verify hermes-quota-max-router --sha <sha>` en verde y revisión independiente sobre ese SHA. GitHub Actions no es requisito de merge.
+
 ## Ground rules
 
 - **Be respectful.** Follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
